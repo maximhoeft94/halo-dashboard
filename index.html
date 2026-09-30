@@ -1,0 +1,2765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Halo Dashboard</title>
+<meta name="description" content="Live Halo 3 performance dashboard: win rates, K/D trends, map and team-side analysis, built from a Google Sheet.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Halo Dashboard · Combat Telemetry">
+<meta property="og:description" content="Live Halo 3 performance analytics: win rates, K/D trends, map and team-side breakdowns.">
+<meta property="og:url" content="https://maximhoeft94.github.io/halo-dashboard/">
+<meta property="og:image" content="https://maximhoeft94.github.io/halo-dashboard/screenshots/overview.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<style>
+  :root {
+    /* Spartan green Win98 palette */
+    --bg-deep: #1a2818;           /* deep olive */
+    --bg-surface: #2d4a2b;        /* military green panel */
+    --bg-panel: #3a5e36;          /* lighter panel */
+    --bg-inset: #1d3019;          /* sunken inset */
+    --hud: #7fff00;               /* matrix/HUD green */
+    --hud-bright: #b3ff66;        /* highlight */
+    --hud-dim: rgba(127, 255, 0, 0.4);
+    --text: #d4e8a8;              /* pale green text */
+    --muted: #8aa377;             /* faded military */
+    --tertiary: #6b8557;
+    --border-light: #5e8f4f;      /* bevel highlight (top/left) */
+    --border-dark: #1a2818;       /* bevel shadow (bottom/right) */
+    --border-strong: #7fff00;
+    --win: #7fff00;
+    --loss: #ff4040;
+    --accent: #d4af37;            /* Spartan visor gold */
+    --titlebar: #2d4a2b;          /* deep title bar */
+    --titlebar-text: #d4af37;
+    --font-display: 'Press Start 2P', monospace;
+    --font-mono: 'VT323', 'Courier New', monospace;
+    --font-body: 'VT323', 'Courier New', monospace;
+    --pixel: 2px;                 /* base pixel unit */
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg-deep); }
+  body {
+    margin: 0;
+    font-family: var(--font-body); font-size: 17px;
+    color: var(--text); line-height: 1.35;
+    min-height: 100vh;
+    background: var(--bg-deep);
+    /* Win98 dithered checkerboard background */
+    background-image:
+      linear-gradient(45deg, rgba(127,255,0,0.02) 25%, transparent 25%),
+      linear-gradient(-45deg, rgba(127,255,0,0.02) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, rgba(127,255,0,0.02) 75%),
+      linear-gradient(-45deg, transparent 75%, rgba(127,255,0,0.02) 75%);
+    background-size: 8px 8px;
+    background-attachment: fixed;
+    image-rendering: pixelated;
+    -webkit-font-smoothing: none;
+    font-smoothing: none;
+  }
+  body::before { display: none; }  /* kill old scanlines */
+  header {
+    padding: 12px 20px;
+    background: var(--titlebar);
+    border-bottom: var(--pixel) solid var(--border-light);
+    box-shadow: inset 1px 1px 0 var(--bg-panel), inset -1px -1px 0 var(--bg-inset);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px;
+    position: relative; z-index: 2;
+  }
+  header h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 14px; font-weight: 400; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--titlebar-text);
+    text-shadow: 1px 1px 0 #000;
+  }
+  header h1 .accent { color: var(--hud); }
+  header .subtitle {
+    display: block; font-family: var(--font-mono); font-size: 14px;
+    letter-spacing: 1px; color: var(--hud-dim); margin-top: 2px; text-transform: uppercase;
+  }
+  header .meta {
+    font-family: var(--font-mono); font-size: 16px;
+    color: var(--hud); letter-spacing: 1px;
+  }
+  /* Win98 buttons — beveled raised */
+  .win98-btn, header .meta button {
+    margin-left: 10px; font-family: var(--font-mono); font-size: 15px;
+    letter-spacing: 1px; padding: 4px 14px;
+    background: var(--bg-panel);
+    color: var(--hud-bright); cursor: pointer; text-transform: uppercase;
+    border: var(--pixel) solid;
+    border-color: var(--border-light) var(--border-dark) var(--border-dark) var(--border-light);
+    border-radius: 0;
+    box-shadow: inset 1px 1px 0 #5e8f4f, inset -1px -1px 0 #0a1408;
+  }
+  .win98-btn:hover, header .meta button:hover {
+    background: var(--bg-surface);
+  }
+  .win98-btn:active, header .meta button:active {
+    border-color: var(--border-dark) var(--border-light) var(--border-light) var(--border-dark);
+    box-shadow: inset 1px 1px 0 #0a1408, inset -1px -1px 0 #5e8f4f;
+  }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 12px 16px 60px; position: relative; z-index: 2; }
+
+  /* Win98 panel — beveled raised */
+  .filter-bar, .card, .metric-card, .recent-mini, .all-time-item, .map-stat-card, .tendency-item {
+    background: var(--bg-surface);
+    border: var(--pixel) solid;
+    border-color: var(--border-light) var(--border-dark) var(--border-dark) var(--border-light);
+    border-radius: 0;
+    box-shadow: inset 1px 1px 0 #5e8f4f, inset -1px -1px 0 #0a1408;
+  }
+  .filter-bar { padding: 12px 16px; margin-bottom: 12px; }
+  .filter-label {
+    font-family: var(--font-display); font-size: 11px; font-weight: 400;
+    letter-spacing: 2px; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .filter-hint {
+    font-family: var(--font-mono); font-size: 14px; color: var(--muted);
+    letter-spacing: 0.5px; margin: 0 0 10px;
+  }
+  .map-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .map-chip {
+    font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.5px;
+    padding: 4px 10px;
+    background: var(--bg-panel);
+    color: var(--text);
+    cursor: pointer; text-transform: uppercase;
+    border: var(--pixel) solid;
+    border-color: var(--border-light) var(--border-dark) var(--border-dark) var(--border-light);
+    border-radius: 0;
+    box-shadow: inset 1px 1px 0 #5e8f4f, inset -1px -1px 0 #0a1408;
+  }
+  .map-chip:hover { background: var(--bg-surface); color: var(--hud-bright); }
+  .map-chip.active {
+    background: var(--bg-inset);
+    color: var(--hud);
+    border-color: var(--border-dark) var(--border-light) var(--border-light) var(--border-dark);
+    box-shadow: inset 1px 1px 0 #0a1408, inset -1px -1px 0 #5e8f4f;
+  }
+  .map-chip .n { color: var(--accent); margin-left: 4px; }
+
+  /* Metric cards */
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; margin-bottom: 12px; }
+  .metric-card { padding: 10px 14px; }
+  .metric-card::before { display: none; }
+  .metric-label {
+    font-family: var(--font-mono); font-size: 13px; letter-spacing: 1px;
+    color: var(--muted); margin: 0 0 4px; text-transform: uppercase;
+  }
+  .metric-value {
+    font-family: var(--font-display); font-size: 16px; font-weight: 400;
+    margin: 0; line-height: 1.1; color: var(--hud);
+    text-shadow: 1px 1px 0 #000;
+    word-break: break-word;
+  }
+  .metric-value.compact { font-size: 12px; }
+  .metric-sub { font-family: var(--font-mono); font-size: 13px; color: var(--tertiary); margin: 4px 0 0; }
+
+  /* Card titles */
+  .card { padding: 12px 16px; margin-bottom: 12px; }
+  .card::before { display: none; }
+  .card h3 {
+    font-family: var(--font-display); font-size: 11px; font-weight: 400;
+    letter-spacing: 2px; text-transform: uppercase;
+    margin: 0 0 4px; color: var(--accent);
+    text-shadow: 1px 1px 0 #000;
+  }
+  .card .sub { font-family: var(--font-mono); font-size: 14px; color: var(--muted); margin: 0 0 10px; }
+  .chart-wrap { position: relative; width: 100%;
+    background: var(--bg-inset); padding: 6px;
+    border: var(--pixel) solid;
+    border-color: var(--border-dark) var(--border-light) var(--border-light) var(--border-dark);
+    box-shadow: inset 1px 1px 0 #0a1408, inset -1px -1px 0 #5e8f4f;
+  }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .row2 { grid-template-columns: 1fr; } main { padding: 6px; } header { padding: 8px; } header h1 { font-size: 11px; letter-spacing: 1px; } }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 14px; }
+  table th {
+    text-align: left; padding: 5px 8px; color: var(--accent);
+    font-weight: 400; letter-spacing: 1px; text-transform: uppercase; font-size: 12px;
+    background: var(--bg-panel);
+    border-bottom: var(--pixel) solid var(--border-dark);
+  }
+  table td { padding: 4px 8px; border-bottom: 1px dotted var(--tertiary); color: var(--text); }
+  table tr:last-child td { border-bottom: none; }
+  table tr:hover td { background: rgba(127,255,0,0.06); }
+  .pill { display: inline-block; padding: 1px 8px; font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px; font-weight: 400; border: 1px solid; }
+  .pill-w { background: rgba(127,255,0,0.2); color: var(--hud-bright); border-color: var(--hud); }
+  .pill-l { background: rgba(255,64,64,0.2); color: #ffaab2; border-color: var(--loss); }
+
+  #error { background: rgba(255,64,64,0.2); color: #ffaab2; padding: 8px 12px;
+    border: var(--pixel) solid var(--loss); margin-bottom: 12px; display: none;
+    font-family: var(--font-mono); font-size: 14px; }
+  .empty-state {
+    font-family: var(--font-mono); color: var(--muted);
+    text-align: center; padding: 30px 16px; letter-spacing: 1px; font-size: 14px;
+  }
+
+  /* Section divider — strong visual break between major sections */
+  .section-divider {
+    height: 2px;
+    background: var(--hud);
+    border: none;
+    margin: 16px 0 16px;
+    box-shadow: 0 0 8px rgba(127, 255, 0, 0.4);
+  }
+
+  /* Collapsible card */
+  .card-toggle {
+    cursor: pointer; user-select: none;
+    margin: 0; transition: opacity 0.15s ease;
+  }
+  .card-toggle:hover { opacity: 0.85; }
+  .card.collapsed .card-body { display: none; }
+  .card.collapsed {
+    padding-top: 10px; padding-bottom: 10px;
+    margin-bottom: 8px;
+  }
+
+  /* Scrollable match log */
+  .scroll-table {
+    max-height: 720px; overflow-y: auto;
+    border: var(--pixel) solid;
+    border-color: var(--border-dark) var(--border-light) var(--border-light) var(--border-dark);
+    background: var(--bg-inset);
+    scrollbar-width: thin;
+    scrollbar-color: var(--hud-dim) var(--bg-inset);
+  }
+  .scroll-table::-webkit-scrollbar { width: 16px; background: var(--bg-panel); }
+  .scroll-table::-webkit-scrollbar-track { background: var(--bg-inset); }
+  .scroll-table::-webkit-scrollbar-thumb {
+    background: var(--bg-panel);
+    border: 1px solid;
+    border-color: var(--border-light) var(--border-dark) var(--border-dark) var(--border-light);
+  }
+  .scroll-table table thead th {
+    position: sticky; top: 0; background: var(--bg-panel); z-index: 1;
+  }
+
+  /* Map stats */
+  .map-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .map-stat-card { padding: 12px 16px; }
+  .map-stat-card::before { display: none; }
+  .map-stat-card .label {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px;
+    color: var(--muted); margin: 0 0 4px; text-transform: uppercase;
+  }
+  .map-stat-card .map-name {
+    font-family: var(--font-display); font-size: 13px; font-weight: 400;
+    letter-spacing: 1px; color: var(--hud); margin: 0 0 4px;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .map-stat-card .stat-value { font-family: var(--font-mono); font-size: 14px; color: var(--text); }
+  .map-stat-card .stat-value .accent { color: var(--accent); }
+
+  /* Tendencies */
+  .tendency-item { padding: 10px 14px; }
+  .tendency-item.flag-good { border-color: var(--hud) var(--border-dark) var(--border-dark) var(--hud); }
+  .tendency-item.flag-bad { border-color: var(--loss) var(--border-dark) var(--border-dark) var(--loss); }
+  .tendency-item.flag-info { border-color: var(--accent) var(--border-dark) var(--border-dark) var(--accent); }
+  .tendency-item.flag-neutral { border-color: var(--muted) var(--border-dark) var(--border-dark) var(--muted); }
+  .tendency-title {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--hud); margin: 0 0 4px;
+  }
+  .tendency-item.flag-bad .tendency-title { color: #ffaab2; }
+  .tendency-item.flag-info .tendency-title { color: var(--accent); }
+  .tendency-item.flag-neutral .tendency-title { color: var(--muted); }
+  .tendency-body {
+    font-family: var(--font-body); font-size: 15px; line-height: 1.4;
+    color: var(--text); margin: 0;
+  }
+  .tendency-body strong { color: var(--hud-bright); font-weight: 400; }
+  .tendencies-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 8px; margin-top: 8px;
+  }
+  .recs-list { margin: 0; padding: 0; list-style: none; }
+  .recs-list li {
+    padding: 8px 12px 8px 26px; margin-bottom: 6px;
+    background: rgba(212,175,55,0.1);
+    border-left: 3px solid var(--accent);
+    font-size: 15px; line-height: 1.4; position: relative;
+  }
+  .recs-list li::before {
+    content: '◆'; position: absolute; left: 10px; top: 8px;
+    color: var(--accent); font-size: 10px;
+  }
+  .recs-list li strong { color: var(--accent); font-weight: 400; }
+
+  .tendencies-wrap {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    margin-bottom: 12px;
+  }
+  .tendencies-wrap .card { margin-bottom: 0; }
+  .tendencies-wrap.solo { grid-template-columns: 1fr; }
+  @media (max-width: 900px) { .tendencies-wrap { grid-template-columns: 1fr; } }
+
+  /* Recent Form mini-metrics */
+  .recent-mini-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 6px; margin: 6px 0 0;
+  }
+  .recent-mini { padding: 8px 12px; }
+  .recent-mini .lbl {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px;
+    color: var(--muted); margin: 0 0 4px; text-transform: uppercase;
+  }
+  .recent-mini .val {
+    font-family: var(--font-display); font-size: 13px; font-weight: 400;
+    margin: 0; line-height: 1.1; color: var(--hud);
+    text-shadow: 1px 1px 0 #000;
+  }
+  .recent-mini .delta {
+    font-family: var(--font-mono); font-size: 12px;
+    margin-top: 4px;
+  }
+  .recent-mini .delta.up { color: var(--hud); }
+  .recent-mini .delta.down { color: #ffaab2; }
+  .recent-mini .delta.flat { color: var(--muted); }
+
+  /* All-Time Bests — gold-tinted */
+  .all-time-card {
+    background:
+      linear-gradient(135deg, rgba(212,175,55,0.18), rgba(212,175,55,0.06)),
+      var(--bg-panel);
+    border-color: var(--accent) var(--border-dark) var(--border-dark) var(--accent);
+    box-shadow: inset 1px 1px 0 rgba(212,175,55,0.5), inset -1px -1px 0 #0a1408;
+  }
+  .all-time-card > h3 { color: var(--accent); }
+  .all-time-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 6px; margin-top: 8px;
+  }
+  .all-time-item {
+    padding: 8px 12px;
+    background: rgba(26, 40, 24, 0.7);
+    border-color: var(--border-dark) rgba(212,175,55,0.5) rgba(212,175,55,0.5) var(--border-dark);
+  }
+  .all-time-item .at-lbl {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px;
+    color: var(--accent); margin: 0 0 4px; text-transform: uppercase;
+    opacity: 0.85;
+  }
+  .all-time-item .at-val {
+    font-family: var(--font-display); font-size: 14px; font-weight: 400;
+    margin: 0; line-height: 1.1; color: var(--hud-bright);
+    text-shadow: 1px 1px 0 #000;
+    word-break: break-word;
+  }
+  .all-time-item .at-sub {
+    font-family: var(--font-mono); font-size: 12px; color: var(--tertiary);
+    margin: 4px 0 0; letter-spacing: 0.5px;
+  }
+
+  /* Three-column distribution row */
+  .row3 { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .dist-subtitle {
+    font-family: var(--font-mono); font-size: 13px; color: var(--accent);
+    margin: 0 0 6px; letter-spacing: 1px; text-transform: uppercase;
+  }
+  .section-title {
+    font-family: var(--font-display); font-size: 12px; font-weight: 400;
+    letter-spacing: 3px; text-transform: uppercase;
+    color: var(--accent); margin: 8px 0 4px;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .section-sub {
+    font-family: var(--font-mono); font-size: 14px; color: var(--muted);
+    letter-spacing: 0.5px; margin: 0 0 10px;
+  }
+
+  /* Game Type Comparison */
+  #gametype-compare-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 6px;
+  }
+  .gt-card {
+    padding: 10px 14px;
+    background: var(--bg-panel);
+    border: var(--pixel) solid;
+    border-color: var(--border-light) var(--border-dark) var(--border-dark) var(--border-light);
+  }
+  .gt-card .gt-name {
+    font-family: var(--font-display); font-size: 13px; color: var(--accent);
+    margin: 0 0 6px; letter-spacing: 1px;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .gt-card .gt-row {
+    font-family: var(--font-mono); font-size: 14px; color: var(--text);
+    display: flex; justify-content: space-between; padding: 2px 0;
+  }
+  .gt-card .gt-row .lbl { color: var(--muted); text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
+  .gt-card .gt-row .val { color: var(--hud-bright); }
+
+  /* Hall of Fame — red-tinted */
+  .hall-of-fame-card {
+    background:
+      linear-gradient(135deg, rgba(255,64,64,0.18), rgba(255,64,64,0.06)),
+      var(--bg-panel);
+    border-color: var(--loss) var(--border-dark) var(--border-dark) var(--loss);
+    box-shadow: inset 1px 1px 0 rgba(255,64,64,0.5), inset -1px -1px 0 #0a1408;
+  }
+  .hall-of-fame-card > h3 { color: #ffaab2; }
+  .hof-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 6px;
+  }
+  .hof-item {
+    padding: 10px 14px;
+    background: rgba(26, 40, 24, 0.7);
+    border: var(--pixel) solid;
+    border-color: var(--border-dark) rgba(255,64,64,0.5) rgba(255,64,64,0.5) var(--border-dark);
+  }
+  .hof-item.flag-trophy { border-color: var(--accent) var(--border-dark) var(--border-dark) var(--accent); }
+  .hof-item.flag-shame { border-color: var(--loss) var(--border-dark) var(--border-dark) var(--loss); }
+  .hof-item .hof-lbl {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 1px;
+    color: var(--muted); text-transform: uppercase; margin: 0 0 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .hof-item.flag-trophy .hof-lbl { color: var(--accent); }
+  .hof-item.flag-shame .hof-lbl { color: #ffaab2; }
+  .hof-item .hof-val {
+    font-family: var(--font-display); font-size: 14px; color: var(--hud);
+    margin: 0; line-height: 1.2;
+    text-shadow: 1px 1px 0 #000;
+  }
+  .hof-item .hof-sub {
+    font-family: var(--font-mono); font-size: 13px; color: var(--tertiary);
+    margin: 4px 0 0;
+  }
+  .hof-item .icon { font-size: 14px; }
+
+  /* Metric card rich tooltip */
+  .metric-card { position: relative; }
+  .metric-card .tooltip {
+    position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 240px; max-width: 320px;
+    background: var(--bg-surface);
+    border: var(--pixel) solid;
+    border-color: var(--border-light) var(--border-dark) var(--border-dark) var(--border-light);
+    box-shadow: inset 1px 1px 0 #5e8f4f, inset -1px -1px 0 #0a1408, 2px 2px 0 #000;
+    padding: 10px 12px; z-index: 100;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.1s ease;
+    font-family: var(--font-body); font-size: 14px; line-height: 1.4;
+    color: var(--text);
+  }
+  .metric-card:hover .tooltip { opacity: 1; pointer-events: auto; }
+  .metric-card .tooltip h4 {
+    font-family: var(--font-display); font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 6px;
+  }
+  .metric-card .tooltip p { margin: 4px 0; }
+  .metric-card .tooltip .example {
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+    margin-top: 4px;
+  }
+  .metric-card.tip-left .tooltip { left: auto; right: 0; }
+
+  /* ===== Tabs ===== */
+  .tab-bar { max-width: 1200px; margin: 12px auto 0; padding: 0 16px; display: flex; gap: 4px; flex-wrap: wrap; position: relative; z-index: 2; }
+  .tab-btn {
+    font-family: var(--font-display); font-size: 10px; letter-spacing: 1px;
+    padding: 10px 14px; background: var(--bg-panel); color: var(--text);
+    cursor: pointer; text-transform: uppercase;
+    border: var(--pixel) solid;
+    border-color: var(--border-light) var(--border-dark) var(--border-dark) var(--border-light);
+    border-radius: 0;
+    box-shadow: inset 1px 1px 0 #5e8f4f, inset -1px -1px 0 #0a1408;
+  }
+  .tab-btn:hover { color: var(--hud-bright); }
+  .tab-btn.active {
+    background: var(--bg-inset); color: var(--accent);
+    border-color: var(--border-dark) var(--border-light) var(--border-light) var(--border-dark);
+    box-shadow: inset 1px 1px 0 #0a1408, inset -1px -1px 0 #5e8f4f;
+    text-shadow: 1px 1px 0 #000;
+  }
+
+  /* ===== Map & Side analysis ===== */
+  .team-red { color: #ff8080; }
+  .team-blue { color: #80c4ff; }
+  .map-chip.chip-red.active { color: #ff8080; }
+  .map-chip.chip-blue.active { color: #80c4ff; }
+  .delta-up { color: var(--hud); }
+  .delta-down { color: #ffaab2; }
+  .delta-flat { color: var(--muted); }
+  .az-matrix td, .az-matrix th { text-align: center; white-space: nowrap; }
+  .az-matrix td:first-child, .az-matrix th:first-child { text-align: left; }
+  .az-matrix th.sortable { cursor: pointer; }
+  .az-matrix th.sortable:hover { color: var(--hud-bright); }
+  .az-matrix th.group { text-align: center; border-bottom: 1px dotted var(--tertiary); }
+  .az-matrix tbody tr { cursor: pointer; }
+  .az-matrix tbody tr.selected td { outline: 1px solid var(--accent); outline-offset: -1px; color: var(--hud-bright); }
+  .az-matrix tr.total-row td { border-top: var(--pixel) solid var(--tertiary); color: var(--accent); cursor: default; }
+  .az-matrix td.small { opacity: 0.55; }
+  .side-table td, .side-table th { text-align: center; }
+  .side-table td:first-child, .side-table th:first-child { text-align: left; color: var(--muted); text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
+  .side-table td.better { color: var(--hud-bright); background: rgba(127,255,0,0.1); }
+  .side-verdict { font-family: var(--font-mono); font-size: 15px; margin: 10px 0 0; color: var(--text); }
+  .side-verdict strong { color: var(--accent); font-weight: 400; }
+  #az-metrics { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 720px) { #az-metrics { grid-template-columns: repeat(2, 1fr); } }
+
+  /* =====================================================================
+     HALO HUD THEME: overrides the old Win98 / pixel styling above.
+     Same palette; clean sci-fi fonts, glass panels, corner brackets.
+     ===================================================================== */
+  :root {
+    --font-display: 'Orbitron', 'Rajdhani', sans-serif;
+    --font-mono: 'Rajdhani', 'Segoe UI', sans-serif;
+    --font-body: 'Rajdhani', 'Segoe UI', sans-serif;
+    --bg-deep: #0c150b;
+    --panel: rgba(24, 40, 22, 0.72);
+    --panel-solid: #16261a;
+    --line: rgba(127, 255, 0, 0.16);
+    --line-strong: rgba(127, 255, 0, 0.35);
+    --glow: 0 0 12px rgba(127, 255, 0, 0.35);
+    --cut: 10px;
+  }
+  html, body { background: var(--bg-deep); }
+  body {
+    font-family: var(--font-body); font-size: 16px; font-weight: 500;
+    line-height: 1.45; letter-spacing: 0.2px;
+    image-rendering: auto;
+    -webkit-font-smoothing: antialiased; font-smoothing: antialiased;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(127,255,0,0.10), transparent 70%),
+      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(212,175,55,0.06), transparent 70%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='98' viewBox='0 0 56 98'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0 32L0 82V66' fill='none' stroke='%237fff00' stroke-opacity='0.045' stroke-width='1'/%3E%3C/svg%3E"),
+      var(--bg-deep);
+    background-attachment: fixed;
+  }
+
+  /* ---- Header ---- */
+  header {
+    padding: 16px 28px;
+    background: linear-gradient(180deg, rgba(24,40,22,0.95), rgba(12,21,11,0.9));
+    border-bottom: 1px solid var(--line-strong);
+    box-shadow: 0 1px 0 rgba(127,255,0,0.08), 0 8px 30px rgba(0,0,0,0.45);
+  }
+  header::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--hud), transparent);
+    opacity: 0.7;
+  }
+  header h1 {
+    font-size: 18px; font-weight: 700; letter-spacing: 4px;
+    color: var(--accent); text-shadow: 0 0 14px rgba(212,175,55,0.35);
+  }
+  header h1 .accent { color: var(--hud); text-shadow: var(--glow); }
+  header .subtitle { font-size: 13px; letter-spacing: 3px; color: var(--muted); margin-top: 4px; }
+  header .meta { font-size: 15px; letter-spacing: 1px; color: var(--hud); }
+
+  /* ---- Buttons, chips, tabs: angled HUD shapes ---- */
+  .win98-btn, header .meta button, .map-chip, .tab-btn {
+    border: 1px solid var(--line-strong);
+    border-radius: 0;
+    box-shadow: none;
+    background: rgba(127,255,0,0.04);
+    clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .win98-btn, header .meta button {
+    font-family: var(--font-display); font-size: 11px; font-weight: 600; letter-spacing: 2px;
+    padding: 8px 18px; color: var(--hud);
+  }
+  .win98-btn:hover, header .meta button:hover,
+  .map-chip:hover, .tab-btn:hover {
+    background: rgba(127,255,0,0.12); color: var(--hud-bright); border-color: var(--hud);
+  }
+  .win98-btn:active, header .meta button:active {
+    border-color: var(--hud); box-shadow: none; background: rgba(127,255,0,0.2);
+  }
+  .map-chip {
+    --cut: 6px;
+    font-family: var(--font-body); font-size: 14px; font-weight: 600; letter-spacing: 1px;
+    padding: 5px 12px; color: var(--text);
+  }
+  .map-chip.active {
+    background: linear-gradient(180deg, rgba(127,255,0,0.28), rgba(127,255,0,0.12));
+    color: #eaffd0; border-color: var(--hud); box-shadow: none;
+    text-shadow: 0 0 8px rgba(127,255,0,0.6);
+  }
+  .map-chip.chip-red.active { background: linear-gradient(180deg, rgba(255,90,90,0.32), rgba(255,90,90,0.12)); border-color: #ff8080; color: #ffd6d6; text-shadow: 0 0 8px rgba(255,90,90,0.6); }
+  .map-chip.chip-blue.active { background: linear-gradient(180deg, rgba(90,170,255,0.32), rgba(90,170,255,0.12)); border-color: #80c4ff; color: #dcefff; text-shadow: 0 0 8px rgba(90,170,255,0.6); }
+  .map-chip .n { color: var(--accent); opacity: 0.85; font-weight: 500; }
+
+  .tab-bar { margin-top: 18px; gap: 6px; }
+  .tab-btn {
+    font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 2px;
+    padding: 11px 22px; color: var(--muted);
+  }
+  .tab-btn.active {
+    background: linear-gradient(180deg, rgba(212,175,55,0.22), rgba(212,175,55,0.06));
+    color: var(--accent); border-color: var(--accent);
+    box-shadow: none; text-shadow: 0 0 10px rgba(212,175,55,0.45);
+  }
+
+  /* ---- Panels: glass with gold corner bracket ---- */
+  .filter-bar, .card, .metric-card, .recent-mini, .all-time-item, .map-stat-card,
+  .tendency-item, .gt-card, .hof-item {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    box-shadow: inset 0 1px 0 rgba(127,255,0,0.06), 0 6px 24px rgba(0,0,0,0.25);
+    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  }
+  .filter-bar::before, .card::before, .metric-card::before, .map-stat-card::before {
+    content: ''; display: block; position: absolute; top: -1px; left: -1px;
+    width: 14px; height: 14px; pointer-events: none;
+    border-top: 2px solid var(--accent); border-left: 2px solid var(--accent);
+  }
+  .filter-bar::after, .card::after {
+    content: ''; position: absolute; bottom: -1px; right: -1px;
+    width: 14px; height: 14px; pointer-events: none;
+    border-bottom: 2px solid var(--line-strong); border-right: 2px solid var(--line-strong);
+  }
+  .card .card::before, .card .card::after { display: none; }
+  .card, .filter-bar { padding: 18px 22px; margin-bottom: 16px; }
+  .card.collapsed { padding-top: 14px; padding-bottom: 14px; margin-bottom: 10px; }
+  .card:hover, .metric-card:hover { border-color: var(--line-strong); }
+
+  .card h3, .filter-label {
+    font-family: var(--font-display); font-size: 13px; font-weight: 600;
+    letter-spacing: 3px; color: var(--accent); text-shadow: none;
+  }
+  .card-toggle { position: relative; padding-right: 24px; }
+  .card-toggle::after {
+    content: '▾'; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    font-family: var(--font-body); color: var(--muted); transition: transform 0.15s ease;
+  }
+  .card.collapsed .card-toggle::after { transform: translateY(-50%) rotate(-90deg); }
+  .card .sub, .filter-hint, .section-sub { font-size: 15px; color: var(--muted); letter-spacing: 0.3px; }
+
+  /* ---- Section titles + divider ---- */
+  .section-title {
+    font-size: 15px; font-weight: 700; letter-spacing: 4px; margin: 20px 0 6px;
+    text-shadow: 0 0 12px rgba(212,175,55,0.3);
+  }
+  .section-divider {
+    height: 1px; margin: 22px 0;
+    background: linear-gradient(90deg, transparent, var(--hud), transparent);
+    box-shadow: 0 0 10px rgba(127,255,0,0.45);
+  }
+
+  /* ---- Metrics ---- */
+  .metric-grid { gap: 10px; }
+  .metric-card { padding: 14px 16px; }
+  .metric-label, .recent-mini .lbl, .map-stat-card .label, .all-time-item .at-lbl, .hof-item .hof-lbl {
+    font-family: var(--font-body); font-size: 12px; font-weight: 600; letter-spacing: 2px;
+  }
+  .metric-value, .recent-mini .val, .all-time-item .at-val, .hof-item .hof-val, .map-stat-card .map-name {
+    font-family: var(--font-display); font-weight: 600; letter-spacing: 1px;
+    text-shadow: 0 0 12px rgba(127,255,0,0.35);
+    font-variant-numeric: tabular-nums;
+  }
+  .metric-value.compact { font-size: 16px; }
+  .recent-mini .val, .all-time-item .at-val, .hof-item .hof-val { font-size: 18px; }
+  .metric-sub, .recent-mini .delta, .all-time-item .at-sub, .hof-item .hof-sub { font-size: 13px; }
+  .recent-mini { padding: 12px 14px; }
+
+  /* ---- Tooltips ---- */
+  .metric-card .tooltip {
+    background: rgba(12,21,11,0.97);
+    border: 1px solid var(--line-strong); border-radius: 2px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    font-size: 14px;
+  }
+  .metric-card .tooltip h4 { font-family: var(--font-display); letter-spacing: 2px; }
+
+  /* ---- Charts & tables ---- */
+  .chart-wrap {
+    background: rgba(6,12,6,0.55);
+    border: 1px solid var(--line); border-radius: 2px;
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.35);
+    padding: 10px;
+  }
+  .scroll-table {
+    border: 1px solid var(--line); border-radius: 2px;
+    background: rgba(6,12,6,0.45);
+  }
+  .scroll-table::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+  .scroll-table::-webkit-scrollbar-track { background: transparent; }
+  .scroll-table::-webkit-scrollbar-thumb { background: rgba(127,255,0,0.25); border: none; border-radius: 4px; }
+  table { font-family: var(--font-body); font-size: 15px; font-variant-numeric: tabular-nums; }
+  table th, .scroll-table table thead th {
+    background: rgba(20,34,20,0.98); border-bottom: 1px solid var(--line-strong);
+    font-family: var(--font-body); font-weight: 700; font-size: 12px; letter-spacing: 2px;
+  }
+  table td { border-bottom: 1px solid rgba(127,255,0,0.07); padding: 6px 10px; }
+  .pill { font-family: var(--font-body); font-weight: 700; border-radius: 2px; padding: 0 8px; }
+
+  /* ---- Special cards ---- */
+  .all-time-card {
+    background: linear-gradient(135deg, rgba(212,175,55,0.14), rgba(212,175,55,0.03)), var(--panel);
+    border-color: rgba(212,175,55,0.35); box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+  }
+  .hall-of-fame-card {
+    background: linear-gradient(135deg, rgba(255,64,64,0.14), rgba(255,64,64,0.03)), var(--panel);
+    border-color: rgba(255,64,64,0.35); box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+  }
+  .hall-of-fame-card::before { border-color: var(--loss); }
+  .all-time-item { background: rgba(10,18,10,0.55); border-color: rgba(212,175,55,0.25); }
+  .hof-item { background: rgba(10,18,10,0.55); border-color: rgba(255,64,64,0.2); }
+  .hof-item.flag-trophy { border-color: rgba(212,175,55,0.25); border-left: 3px solid var(--accent); }
+  .hof-item.flag-shame { border-color: rgba(255,64,64,0.25); border-left: 3px solid var(--loss); }
+  .gt-card { background: rgba(10,18,10,0.55); }
+  .gt-card .gt-name { font-family: var(--font-display); font-weight: 600; text-shadow: none; }
+  .gt-card .gt-row { font-family: var(--font-body); font-size: 15px; }
+
+  .tendency-item { background: rgba(10,18,10,0.55); border-color: var(--line); }
+  .tendency-item.flag-good { border-color: var(--line); border-left: 3px solid var(--hud); }
+  .tendency-item.flag-bad { border-color: var(--line); border-left: 3px solid var(--loss); }
+  .tendency-item.flag-info { border-color: var(--line); border-left: 3px solid var(--accent); }
+  .tendency-item.flag-neutral { border-color: var(--line); border-left: 3px solid var(--muted); }
+  .tendency-title { font-family: var(--font-body); font-weight: 700; letter-spacing: 1px; }
+
+  .recs-list li {
+    background: linear-gradient(90deg, rgba(212,175,55,0.12), rgba(212,175,55,0.02));
+    border-left: 2px solid var(--accent); font-size: 16px; padding: 10px 14px 10px 30px;
+  }
+  .recs-list li::before { content: '▸'; top: 9px; font-size: 13px; }
+
+  #error { border: 1px solid var(--loss); border-radius: 2px; font-family: var(--font-body); }
+  .empty-state { font-family: var(--font-body); font-size: 15px; }
+  .side-verdict { font-family: var(--font-body); font-size: 16px; }
+  .metric-value { font-size: 20px; }
+  .az-matrix tbody tr.selected td {
+    outline: none; color: var(--accent);
+    box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
+  }
+  .az-matrix tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>UNSC <span class="accent">//</span> COMBAT TELEMETRY</h1>
+    <span class="subtitle">Spartan performance archive · classified</span>
+  </div>
+  <div class="meta">
+    <span id="game-count">— games</span> · <span id="last-updated">loading…</span>
+    <button id="sync-btn" onclick="resync()">↻ Sync</button>
+  </div>
+</header>
+
+<nav class="tab-bar">
+  <button class="tab-btn active" data-tab="overview" onclick="showTab('overview')">Overview</button>
+  <button class="tab-btn" data-tab="analysis" onclick="showTab('analysis')">Map &amp; Side Analysis</button>
+</nav>
+
+<main>
+  <div id="error"></div>
+
+  <div id="view-overview">
+
+  <div class="card all-time-card collapsed" id="all-time-card">
+    <h3 class="card-toggle" onclick="document.getElementById('all-time-card').classList.toggle('collapsed')">
+      All-Time Bests
+    </h3>
+    <div class="card-body">
+      <p class="sub">From your complete dataset. Never affected by filters — these are your records, period.</p>
+      <div class="all-time-grid" id="all-time-grid"></div>
+    </div>
+  </div>
+
+  <div class="card hall-of-fame-card collapsed" id="hall-of-fame-card">
+    <h3 class="card-toggle" onclick="document.getElementById('hall-of-fame-card').classList.toggle('collapsed')">
+      Hall of Fame &amp; Oddities
+    </h3>
+    <div class="card-body">
+      <p class="sub" id="hof-sub">Rare achievements, weird records, and bragging-rights stats from your full dataset.</p>
+      <div class="hof-grid" id="hof-grid"></div>
+    </div>
+  </div>
+
+  <h2 class="section-title">⟢ Overall</h2>
+  <p class="section-sub">Lifetime totals across your full dataset. Not affected by filters.</p>
+  <div class="metric-grid" id="top-metrics"></div>
+
+  <hr class="section-divider">
+
+  <div class="filter-bar">
+    <p class="filter-label">⟢ Battlefield Filter</p>
+    <p class="filter-hint">Pick one map to filter all stats below. Click again or "All Maps" to clear.</p>
+    <div class="map-chips" id="map-chips"></div>
+
+    <p class="filter-label" style="margin-top: 16px;">⟢ Game Type Filter</p>
+    <p class="filter-hint">Click types to filter. Click multiple to combine. Click "All Types" to clear.</p>
+    <div class="map-chips" id="gametype-chips"></div>
+
+    <p class="filter-label" style="margin-top: 16px;">⟢ Outcome Filter</p>
+    <div class="map-chips" id="outcome-chips">
+      <button class="map-chip active" data-outcome="all">All</button>
+      <button class="map-chip" data-outcome="W">Wins Only</button>
+      <button class="map-chip" data-outcome="L">Losses Only</button>
+    </div>
+  </div>
+
+
+    <div class="card" id="recent-form-card">
+      <h3 class="card-toggle" onclick="document.getElementById('recent-form-card').classList.toggle('collapsed')">
+        <span id="recent-form-title">Recent Form · Last 25</span>
+      </h3>
+      <div class="card-body">
+        <p class="sub" id="recent-form-sub">Most recent games in the current filter. Compare against your overall baseline to spot hot/cold trends.</p>
+        <div class="recent-mini-grid" id="recent-mini-grid"></div>
+        <div class="chart-wrap" style="height: 280px; margin-top: 12px;"><canvas id="ch_recent"></canvas></div>
+        <p class="dist-subtitle" style="margin-top: 16px;">Kills / Assists / Deaths trend</p>
+        <div class="chart-wrap" style="height: 240px;"><canvas id="ch_recent_kad"></canvas></div>
+
+        <div class="tendencies-wrap" id="tendencies-wrap" style="margin-top: 20px;">
+          <div class="card tendencies-card" id="tendencies-overall-card">
+            <h3>⟢ Current Tendencies</h3>
+            <p class="sub" id="tendencies-overall-sub">Patterns from your last 25 games — rolling window, never affected by filters.</p>
+            <div id="tendencies-overall-content"></div>
+          </div>
+          <div class="card tendencies-card" id="tendencies-filtered-card" style="display: none;">
+            <h3 id="tendencies-filtered-title">⟢ Filtered Tendencies</h3>
+            <p class="sub" id="tendencies-filtered-sub">Patterns from your current filter selection.</p>
+            <div id="tendencies-filtered-content"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card collapsed" id="historicals-card">
+      <h3 class="card-toggle" onclick="document.getElementById('historicals-card').classList.toggle('collapsed')">
+        Historicals
+      </h3>
+      <div class="card-body">
+        <p class="sub">Long-view trends and distributions across your full filtered dataset.</p>
+
+        <div style="margin-top: 12px;">
+          <p class="dist-subtitle" id="trend-title">K/D over time</p>
+          <p class="sub">Gray line = K/D each game. Amber line = 5-game rolling average. Dashed line marks 1.0 (even).</p>
+          <div class="chart-wrap" style="height: 420px;"><canvas id="ch_kd_time"></canvas></div>
+        </div>
+
+        <div style="margin-top: 20px;">
+          <p class="dist-subtitle">Stat Distributions</p>
+          <p class="sub">How often each value occurs across all games in the current filter.</p>
+          <div class="row3">
+            <div>
+              <p class="dist-subtitle">Kills per game</p>
+              <div class="chart-wrap" style="height: 240px;"><canvas id="ch_kdist"></canvas></div>
+            </div>
+            <div>
+              <p class="dist-subtitle">Assists per game</p>
+              <div class="chart-wrap" style="height: 240px;"><canvas id="ch_adist"></canvas></div>
+            </div>
+            <div>
+              <p class="dist-subtitle">Deaths per game</p>
+              <div class="chart-wrap" style="height: 240px;"><canvas id="ch_ddist"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 20px;" id="gametype-compare-card">
+          <p class="dist-subtitle">⟢ Game Type Comparison</p>
+          <p class="sub" id="gametype-compare-sub">Side-by-side performance for each game type. From your full dataset.</p>
+          <div id="gametype-compare-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card collapsed" id="match-log-card">
+      <h3 class="card-toggle" onclick="document.getElementById('match-log-card').classList.toggle('collapsed')">
+        Match log
+      </h3>
+      <div class="card-body">
+        <p class="sub" id="log-sub">Most recent first.</p>
+        <div class="scroll-table">
+          <table id="match-log"></table>
+        </div>
+      </div>
+    </div>
+  </div><!-- /view-overview -->
+
+  <div id="view-analysis" style="display: none;">
+    <div class="filter-bar">
+      <p class="filter-label">⟢ Map</p>
+      <p class="filter-hint">Pick a map to drill in, or click a row in the matrix below. These filters only affect this tab.</p>
+      <div class="map-chips" id="az-map-chips"></div>
+
+      <p class="filter-label" style="margin-top: 16px;">⟢ Team Color</p>
+      <div class="map-chips" id="az-team-chips"></div>
+
+      <p class="filter-label" style="margin-top: 16px;">⟢ Game Type</p>
+      <div class="map-chips" id="az-type-chips"></div>
+    </div>
+
+    <h2 class="section-title" id="az-scope-title">⟢ All maps · Both sides</h2>
+    <p class="section-sub" id="az-scope-sub"></p>
+    <div class="metric-grid" id="az-metrics"></div>
+
+    <div class="card">
+      <h3>⟢ Scouting Report</h3>
+      <p class="sub">Auto-generated from your games. Rankings skip maps with fewer than 5 games.</p>
+      <ul class="recs-list" id="az-insights"></ul>
+    </div>
+
+    <div class="card">
+      <h3 id="az-side-title">Red vs Blue</h3>
+      <p class="sub" id="az-side-sub"></p>
+      <div class="scroll-table" style="max-height: none;"><table class="side-table" id="az-side"></table></div>
+      <p class="side-verdict" id="az-side-verdict"></p>
+    </div>
+
+    <div class="card">
+      <h3>Map × Side Matrix</h3>
+      <p class="sub">Every map split by the side you played. Cells are shaded by win rate: green above 50%, red below. Faded cells have fewer than 5 games. Click a row to drill in, click a header to sort.</p>
+      <div class="scroll-table" style="max-height: none; overflow-x: auto;"><table class="az-matrix" id="az-matrix"></table></div>
+    </div>
+
+    <div class="card">
+      <h3>Win Rate by Map &amp; Side</h3>
+      <p class="sub">Dashed line marks 50%. Hover for game counts; click a map to drill in.</p>
+      <div class="chart-wrap" style="height: 340px;"><canvas id="ch_az_wr"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3 id="az-trend-title">K/D over time</h3>
+      <p class="sub">Each dot is one game in this selection (green = win, red = loss). Gold line = 5-game rolling average. Values above 6 are clipped; hover for the real number.</p>
+      <div class="chart-wrap" style="height: 300px;"><canvas id="ch_az_trend"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3>Games in this selection</h3>
+      <p class="sub" id="az-log-sub">Most recent first.</p>
+      <div class="scroll-table" style="max-height: 480px;"><table id="az-log"></table></div>
+    </div>
+  </div>
+</main>
+
+<footer style="max-width:1200px;margin:0 auto;padding:10px 16px 40px;font-family:var(--font-body);font-size:14px;color:var(--muted);letter-spacing:0.5px;text-align:center;position:relative;z-index:2;">
+  Built by Maxim Hoeft · Data syncs live from Google Sheets ·
+  <a href="https://github.com/maximhoeft94/halo-dashboard" style="color:var(--hud);text-decoration:none;">View source on GitHub</a>
+</footer>
+
+
+<script>
+const C = {
+  hud: '#7fff00', hudBright: '#b3ff66', loss: '#ff4040',
+  accent: '#d4af37', muted: '#8aa377', text: '#d4e8a8',
+  grid: 'rgba(127,255,0,0.08)', neutralLine: '#8aa377'
+};
+Chart.defaults.color = C.text;
+Chart.defaults.borderColor = C.grid;
+Chart.defaults.font.family = "'Rajdhani', 'Segoe UI', sans-serif";
+Chart.defaults.font.weight = 600;
+Chart.defaults.font.size = 13;
+
+if (window['chartjs-plugin-annotation']) {
+  Chart.register(window['chartjs-plugin-annotation']);
+}
+
+let allGames = [];
+let allMaps = [];
+let allGameTypes = [];
+let selectedMaps = new Set();
+let selectedGameTypes = new Set();
+let selectedOutcome = 'all'; // 'all' | 'W' | 'L'
+let charts = {};
+
+
+// ===== Static build: read the Google Sheet directly from the browser =====
+const SHEET_ID = '1U9dSs8thSv7FTJSpFEd2UQd4EUml6rhPzuu76VyK45U';
+const TAB_NAME = 'Halo 3';
+const SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(TAB_NAME)}`;
+
+function parseCSV(text) {
+  const rows = []; let row = [], field = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); rows.push(row); row = []; field = '';
+    } else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(v => v.trim() !== ''));
+}
+
+async function fetchHaloData() {
+  const resp = await fetch(SHEET_CSV_URL, { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`Google Sheets returned ${resp.status}`);
+  const rows = parseCSV(await resp.text());
+  const header = rows.shift().map(h => h.trim());
+  const NUM = ['Game', 'Good Guys', 'Bad Guys', 'Kills', 'Assists', 'Deaths', 'Diff', 'Ratio'];
+  const toNum = v => { const n = parseFloat(String(v).replace(/,/g, '')); return isNaN(n) ? null : n; };
+  const games = rows.map(r => {
+    const g = {};
+    header.forEach((h, i) => { g[h] = (r[i] ?? '').trim(); });
+    NUM.forEach(k => { g[k] = toNum(g[k]); });
+    g['Game Type'] = g['Game Type'] || '(unspecified)';
+    return g;
+  }).filter(g => g.Game !== null && g.Result);
+  games.forEach(g => {
+    g.Margin = (g['Good Guys'] ?? 0) - (g['Bad Guys'] ?? 0);
+    if (g.Ratio === null) g.Ratio = g.Deaths ? g.Kills / g.Deaths : (g.Kills || 0);
+  });
+  return {
+    games,
+    maps: [...new Set(games.map(g => g.Map))].sort(),
+    game_types: [...new Set(games.map(g => g['Game Type']))].sort(),
+  };
+}
+
+async function loadAndRender() {
+  try {
+    const d = await fetchHaloData();
+    allGames = d.games;
+    allMaps = d.maps;
+    allGameTypes = d.game_types || [];
+    document.getElementById('game-count').textContent = allGames.length + ' games';
+    document.getElementById('last-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+    renderMapChips();
+    renderGameTypeChips();
+    render();
+    renderAnalysis();
+  } catch (e) {
+    const err = document.getElementById('error');
+    err.style.display = 'block';
+    err.textContent = 'Failed to load data: ' + e.message;
+  }
+}
+
+async function resync() {
+  const btn = document.getElementById('sync-btn');
+  const originalText = btn.textContent;
+  btn.textContent = '⟳ Syncing…';
+  btn.disabled = true;
+  try {
+    const d = await fetchHaloData();
+    allGames = d.games;
+    allMaps = d.maps;
+    allGameTypes = d.game_types || [];
+    // Drop any selected maps/gametypes that no longer exist in the latest data
+    const validMaps = new Set(allMaps);
+    for (const m of selectedMaps) {
+      if (!validMaps.has(m)) selectedMaps.delete(m);
+    }
+    const validTypes = new Set(allGameTypes);
+    for (const t of selectedGameTypes) {
+      if (!validTypes.has(t)) selectedGameTypes.delete(t);
+    }
+    document.getElementById('game-count').textContent = allGames.length + ' games';
+    document.getElementById('last-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+    document.getElementById('error').style.display = 'none';
+    renderMapChips();
+    renderGameTypeChips();
+    render();
+    renderAnalysis();
+  } catch (e) {
+    const err = document.getElementById('error');
+    err.style.display = 'block';
+    err.textContent = 'Sync failed: ' + e.message;
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+function getFilteredGames() {
+  let result = allGames;
+  if (selectedMaps.size > 0) {
+    result = result.filter(g => selectedMaps.has(g.Map));
+  }
+  if (selectedGameTypes.size > 0) {
+    result = result.filter(g => selectedGameTypes.has(g['Game Type']));
+  }
+  if (selectedOutcome !== 'all') {
+    result = result.filter(g => g.Result === selectedOutcome);
+  }
+  return result;
+}
+
+// Score cap for a game = whichever team hit the kill limit (the winner).
+// Used to normalize margins across game types (8v8 = 100, 4v4 = 50, etc.)
+function scoreCap(g) {
+  return Math.max(g['Good Guys'] || 0, g['Bad Guys'] || 0) || 100;
+}
+function marginPct(g) {
+  const cap = scoreCap(g);
+  return cap > 0 ? (g.Margin / cap) * 100 : 0;
+}
+
+function renderMapChips() {
+  const counts = {};
+  allGames.forEach(g => counts[g.Map] = (counts[g.Map] || 0) + 1);
+  const sorted = [...allMaps].sort((a, b) => (counts[b] || 0) - (counts[a] || 0));
+
+  const allChip = `<button class="map-chip ${selectedMaps.size === 0 ? 'active' : ''}" data-map="__all__">All Maps <span class="n">×${allGames.length}</span></button>`;
+  const mapChips = sorted.map(m => `
+    <button class="map-chip ${selectedMaps.has(m) ? 'active' : ''}" data-map="${m.replace(/"/g,'&quot;')}">
+      ${m} <span class="n">×${counts[m]}</span>
+    </button>
+  `).join('');
+
+  document.getElementById('map-chips').innerHTML = allChip + mapChips;
+
+  // Scoped to map-chips container only — don't grab outcome chips
+  // Single-select: clicking a map replaces the selection (or clears it if it was the active one)
+  document.querySelectorAll('#map-chips .map-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const m = btn.dataset.map;
+      if (m === '__all__') {
+        selectedMaps.clear();
+      } else if (selectedMaps.has(m) && selectedMaps.size === 1) {
+        // Clicking the currently-active map clears the filter
+        selectedMaps.clear();
+      } else {
+        // Replace any previous selection with just this map
+        selectedMaps.clear();
+        selectedMaps.add(m);
+      }
+      renderMapChips();
+      render();
+    });
+  });
+}
+
+function renderGameTypeChips() {
+  const counts = {};
+  allGames.forEach(g => {
+    const t = g['Game Type'] || '(unspecified)';
+    counts[t] = (counts[t] || 0) + 1;
+  });
+  const sorted = [...allGameTypes].sort((a, b) => (counts[b] || 0) - (counts[a] || 0));
+
+  const allChip = `<button class="map-chip ${selectedGameTypes.size === 0 ? 'active' : ''}" data-gt="__all__">All Types <span class="n">×${allGames.length}</span></button>`;
+  const typeChips = sorted.map(t => `
+    <button class="map-chip ${selectedGameTypes.has(t) ? 'active' : ''}" data-gt="${t.replace(/"/g,'&quot;')}">
+      ${t} <span class="n">×${counts[t]}</span>
+    </button>
+  `).join('');
+
+  document.getElementById('gametype-chips').innerHTML = allChip + typeChips;
+
+  document.querySelectorAll('#gametype-chips .map-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const t = btn.dataset.gt;
+      if (t === '__all__') {
+        selectedGameTypes.clear();
+      } else {
+        if (selectedGameTypes.has(t)) selectedGameTypes.delete(t);
+        else selectedGameTypes.add(t);
+      }
+      renderGameTypeChips();
+      render();
+    });
+  });
+}
+
+function renderOutcomeChips() {
+  document.querySelectorAll('#outcome-chips .map-chip').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.outcome === selectedOutcome);
+  });
+}
+
+// Bind outcome chips once (they don't get re-rendered)
+document.querySelectorAll('#outcome-chips .map-chip').forEach(btn => {
+  btn.addEventListener('click', () => {
+    selectedOutcome = btn.dataset.outcome;
+    renderOutcomeChips();
+    render();
+  });
+});
+
+
+// ===========================================================================
+// TENDENCIES — pattern detection + recommendations from a set of games.
+// Returns an HTML string so the same logic can drive Overall and Filtered cards.
+// ===========================================================================
+function computeTendenciesHTML(games) {
+  if (!games || games.length === 0) {
+    return '<div class="empty-state">No games to analyze.</div>';
+  }
+
+  // Small-sample guard
+  if (games.length < 4) {
+    return `
+      <div class="tendency-item flag-info">
+        <p class="tendency-title">Sample too small</p>
+        <p class="tendency-body">Only <strong>${games.length} game${games.length===1?'':'s'}</strong> in scope. Need at least 4–5 to detect meaningful patterns. Try broadening the filter.</p>
+      </div>`;
+  }
+
+  // --- compute everything once ---
+  const wins = games.filter(g => g.Result === 'W');
+  const losses = games.filter(g => g.Result === 'L');
+  const n = games.length;
+  const wr = wins.length / n * 100;
+  const mean = (arr, k) => arr.length ? arr.reduce((s,g) => s+g[k], 0) / arr.length : 0;
+  const avgK = mean(games, 'Kills');
+  const avgD = mean(games, 'Deaths');
+  const avgA = mean(games, 'Assists');
+  const avgKD = mean(games, 'Ratio');
+  const avgMarginPct = games.reduce((s,g) => s+marginPct(g), 0) / n;
+
+  const tendencies = [];
+  const recs = [];
+
+  // === 1. Kills vs deaths swing between W and L ===
+  if (wins.length >= 2 && losses.length >= 2) {
+    const wK = mean(wins, 'Kills'), wD = mean(wins, 'Deaths');
+    const lK = mean(losses, 'Kills'), lD = mean(losses, 'Deaths');
+    const killSwing = wK - lK;        // typically positive
+    const deathSwing = lD - wD;       // typically positive (more deaths in losses)
+    const swingRatio = Math.abs(deathSwing) > 0.1 ? deathSwing / Math.max(0.1, Math.abs(killSwing)) : 0;
+
+    if (deathSwing > killSwing * 1.4 && deathSwing > 2) {
+      tendencies.push({
+        flag: 'bad',
+        title: 'Deaths drive outcomes',
+        body: `In wins you average <strong>${wD.toFixed(1)} deaths</strong>; in losses, <strong>${lD.toFixed(1)}</strong>. Kills barely change (${wK.toFixed(1)} vs ${lK.toFixed(1)}). Your deaths swing ${swingRatio.toFixed(1)}× more than kills — staying alive matters more than getting kills.`
+      });
+      recs.push(`<strong>Prioritize survival.</strong> Cutting deaths by 2 per game would lift your win rate meaningfully more than getting 2 extra kills. Watch positioning, avoid 1v2s, reset when low health.`);
+    } else if (killSwing > deathSwing * 1.4 && killSwing > 2) {
+      tendencies.push({
+        flag: 'info',
+        title: 'Kills drive outcomes',
+        body: `Your wins come from <strong>scoring more</strong>, not surviving more. Kills jump from ${lK.toFixed(1)} (losses) to ${wK.toFixed(1)} (wins); deaths only shift by ${deathSwing.toFixed(1)}. You're trading aggressively.`
+      });
+      recs.push(`<strong>Keep the pressure on.</strong> Your kill output is the lever. Push for power weapons and contested angles — playing passive isn't your winning style.`);
+    } else if (Math.abs(killSwing) < 1 && Math.abs(deathSwing) < 1) {
+      tendencies.push({
+        flag: 'neutral',
+        title: 'Stats steady across W/L',
+        body: `Your kills (${wK.toFixed(1)} vs ${lK.toFixed(1)}) and deaths (${wD.toFixed(1)} vs ${lD.toFixed(1)}) barely move between wins and losses. <strong>Outcomes depend on teammates more than your stat line.</strong>`
+      });
+      recs.push(`<strong>Lean into team play.</strong> Since your individual stats don't predict W/L well here, communication, callouts, and objective focus likely matter more than fragging harder.`);
+    }
+  }
+
+  // === 2. Score-margin sensitivity ===
+  // Are you better in close games or blowouts?
+  if (n >= 6) {
+    const close = games.filter(g => Math.abs(marginPct(g)) < 15);
+    const blowout = games.filter(g => Math.abs(marginPct(g)) >= 40);
+    if (close.length >= 2 && blowout.length >= 2) {
+      const closeKD = mean(close, 'Ratio');
+      const blowoutKD = mean(blowout, 'Ratio');
+      if (closeKD > blowoutKD * 1.25) {
+        tendencies.push({
+          flag: 'good',
+          title: 'Clutch in close games',
+          body: `In close games (within 15% of cap) your K/D is <strong>${closeKD.toFixed(2)}</strong>. In blowouts: ${blowoutKD.toFixed(2)}. You step up when the game is on the line.`
+        });
+      } else if (blowoutKD > closeKD * 1.25) {
+        tendencies.push({
+          flag: 'info',
+          title: 'Stat-padder in blowouts',
+          body: `K/D in blowouts: <strong>${blowoutKD.toFixed(2)}</strong>. In close games: ${closeKD.toFixed(2)}. You feast when games are decided but tighten up under pressure.`
+        });
+        recs.push(`<strong>Practice high-pressure play.</strong> Your stats inflate in blowouts. Focus on close-game scenarios — try to replicate that calm under pressure.`);
+      }
+    }
+  }
+
+  // === 3. Side preference ===
+  const redG = games.filter(g => g.Team === 'Red');
+  const blueG = games.filter(g => g.Team === 'Blue');
+  if (redG.length >= 3 && blueG.length >= 3) {
+    const redWR = redG.filter(g => g.Result === 'W').length / redG.length * 100;
+    const blueWR = blueG.filter(g => g.Result === 'W').length / blueG.length * 100;
+    const redKD = mean(redG, 'Ratio');
+    const blueKD = mean(blueG, 'Ratio');
+    const wrGap = redWR - blueWR;
+    const kdGap = redKD - blueKD;
+    if (Math.abs(wrGap) >= 20 || Math.abs(kdGap) >= 0.3) {
+      const better = wrGap > 0 ? 'Red' : 'Blue';
+      const worse = better === 'Red' ? 'Blue' : 'Red';
+      const betterWR = better === 'Red' ? redWR : blueWR;
+      const worseWR = better === 'Red' ? blueWR : redWR;
+      const betterKD = better === 'Red' ? redKD : blueKD;
+      const worseKD = better === 'Red' ? blueKD : redKD;
+      tendencies.push({
+        flag: 'info',
+        title: `${better} side suits you`,
+        body: `On <strong>${better}</strong>: ${betterWR.toFixed(0)}% WR, ${betterKD.toFixed(2)} K/D. On ${worse}: ${worseWR.toFixed(0)}% WR, ${worseKD.toFixed(2)} K/D. Could be spawn sightlines, power-weapon timing, or routing.`
+      });
+      recs.push(`<strong>Study ${worse}-side play.</strong> Watch where ${worse}-side spawns push first and what power positions you're missing. Most maps have asymmetries you can learn around.`);
+    }
+  }
+
+  // === 4. Aggression profile ===
+  // High K + High D = trader, Low K + Low D = passive, etc.
+  if (n >= 5) {
+    const kHi = avgK >= 12;
+    const dHi = avgD >= 11;
+    if (kHi && dHi) {
+      tendencies.push({
+        flag: 'info',
+        title: 'Aggressive trader',
+        body: `<strong>${avgK.toFixed(1)} kills / ${avgD.toFixed(1)} deaths</strong> per game — you're trading hard. High output, high cost. Works in some game types better than others.`
+      });
+      recs.push(`<strong>Pick your trades.</strong> Not every kill is worth a death. The good traders win the *favorable* trades and walk away from the bad ones.`);
+    } else if (!kHi && !dHi) {
+      tendencies.push({
+        flag: 'neutral',
+        title: 'Passive / supportive',
+        body: `${avgK.toFixed(1)} kills / ${avgD.toFixed(1)} deaths — measured pace. ${avgA >= 8 ? `High assists (${avgA.toFixed(1)}) suggest you're enabling teammates more than fragging directly.` : 'Could safely push harder for kills without spiking deaths.'}`
+      });
+      if (avgA < 8) recs.push(`<strong>Push for more engagements.</strong> Your low deaths suggest room to be more aggressive without much added risk. Take fights you'd normally skip.`);
+    } else if (kHi && !dHi) {
+      tendencies.push({
+        flag: 'good',
+        title: 'Efficient fragger',
+        body: `<strong>${avgK.toFixed(1)} kills</strong> with only ${avgD.toFixed(1)} deaths. High output, low cost — best combination there is.`
+      });
+    } else if (!kHi && dHi) {
+      tendencies.push({
+        flag: 'bad',
+        title: 'Dying without scoring',
+        body: `Only ${avgK.toFixed(1)} kills but <strong>${avgD.toFixed(1)} deaths</strong>. You're feeding without getting much back. Likely overextending into bad fights.`
+      });
+      recs.push(`<strong>Cut overextension.</strong> Stay within range of teammates, prioritize easy kills over flashy ones, and disengage when outnumbered.`);
+    }
+  }
+
+  // === 5. Recent direction (only when filter is wide enough to have a meaningful "recent" sample) ===
+  if (n >= 12) {
+    const recent = games.slice(-Math.min(5, Math.floor(n/3)));
+    const earlier = games.slice(0, n - recent.length);
+    const rKD = mean(recent, 'Ratio');
+    const eKD = mean(earlier, 'Ratio');
+    const rWR = recent.filter(g=>g.Result==='W').length / recent.length * 100;
+    const eWR = earlier.filter(g=>g.Result==='W').length / earlier.length * 100;
+    if (rKD - eKD >= 0.3 || rWR - eWR >= 15) {
+      tendencies.push({
+        flag: 'good',
+        title: 'Trending up',
+        body: `Last ${recent.length} games: <strong>${rKD.toFixed(2)} K/D, ${rWR.toFixed(0)}% WR</strong>. Earlier: ${eKD.toFixed(2)} K/D, ${eWR.toFixed(0)}% WR. Whatever you've changed — keep doing it.`
+      });
+    } else if (eKD - rKD >= 0.3 || eWR - rWR >= 15) {
+      tendencies.push({
+        flag: 'bad',
+        title: 'Trending down',
+        body: `Last ${recent.length} games: <strong>${rKD.toFixed(2)} K/D, ${rWR.toFixed(0)}% WR</strong>. Earlier: ${eKD.toFixed(2)} K/D, ${eWR.toFixed(0)}% WR. Form has dipped.`
+      });
+      recs.push(`<strong>Check for tilt or fatigue.</strong> Form is down across your recent games. Take a break, watch a replay, or shift game types before grinding more.`);
+    }
+  }
+
+  // === 6. K/D-vs-WR alignment ===
+  if (avgKD >= 1.3 && wr < 45) {
+    tendencies.push({
+      flag: 'bad',
+      title: 'Good stats, bad outcomes',
+      body: `K/D of <strong>${avgKD.toFixed(2)}</strong> but only ${wr.toFixed(0)}% wins. You're getting kills but losing games — likely chasing kills away from objectives or after games are decided.`
+    });
+    recs.push(`<strong>Play closer to objectives.</strong> Your kills aren't translating to wins. Stay near the action, slay defensively around objectives, and don't chase frags off the map.`);
+  } else if (avgKD < 0.9 && wr > 55) {
+    tendencies.push({
+      flag: 'good',
+      title: 'Team carries you here',
+      body: `K/D ${avgKD.toFixed(2)} but ${wr.toFixed(0)}% wins. You're winning despite individual stats — likely playing support/objective. Assists: ${avgA.toFixed(1)} per game.`
+    });
+    recs.push(`<strong>Lean into the support role.</strong> Stats aren't winning these games — teamwork is. Keep enabling teammates, but consider raising aggression to add another dimension.`);
+  }
+
+  // === 7. Assist swing in W vs L ===
+  if (wins.length >= 2 && losses.length >= 2) {
+    const wA = mean(wins, 'Assists');
+    const lA = mean(losses, 'Assists');
+    const aSwing = wA - lA;
+    if (aSwing >= 2) {
+      tendencies.push({
+        flag: 'good',
+        title: 'Assists track winning',
+        body: `Assists jump from <strong>${lA.toFixed(1)}</strong> in losses to <strong>${wA.toFixed(1)}</strong> in wins (+${aSwing.toFixed(1)}). When you're in fights with teammates rather than solo, you win.`
+      });
+      recs.push(`<strong>Stay with teammates.</strong> Your assist count is a leading indicator of wins here. Avoid solo plays — when you're trading with team support, you win more.`);
+    } else if (aSwing <= -2) {
+      tendencies.push({
+        flag: 'info',
+        title: 'Higher assists in losses',
+        body: `Assists are <strong>${lA.toFixed(1)}</strong> in losses vs ${wA.toFixed(1)} in wins. You're tagging targets in losing fights — your team isn't converting your damage into kills.`
+      });
+      recs.push(`<strong>Finish what you start.</strong> Don't rely on teammates to clean up — when you damage someone, push to confirm the kill yourself.`);
+    }
+  }
+
+  // === 8. Assist-to-kill ratio (playstyle signal) ===
+  if (n >= 5 && avgK > 0) {
+    const aRatio = avgA / avgK;
+    if (aRatio >= 1.0) {
+      tendencies.push({
+        flag: 'info',
+        title: 'Assist-heavy playstyle',
+        body: `<strong>${avgA.toFixed(1)} assists vs ${avgK.toFixed(1)} kills</strong> (${aRatio.toFixed(2)} A/K ratio). You're tagging targets but teammates are closing them. Could mean you're playing chip-damage or your aim is just shy of finishing.`
+      });
+      recs.push(`<strong>Convert assists to kills.</strong> When you've damaged someone, prioritize finishing them over starting the next engagement. One full kill is worth more than two assists.`);
+    } else if (aRatio <= 0.5) {
+      tendencies.push({
+        flag: 'neutral',
+        title: 'Lone-wolf scorer',
+        body: `<strong>${avgK.toFixed(1)} kills vs ${avgA.toFixed(1)} assists</strong> (${aRatio.toFixed(2)} A/K). You're getting your kills clean — minimal teammate involvement. Strong solo player.`
+      });
+      recs.push(`<strong>Consider coordinating more.</strong> Your kills are mostly solo. Calling targets for teammates would multiply your impact without changing your aim or positioning.`);
+    }
+  }
+
+  // === 9. Total contribution (K+A) ===
+  if (n >= 5) {
+    const contribution = avgK + avgA;
+    if (contribution >= 22) {
+      tendencies.push({
+        flag: 'good',
+        title: 'High total impact',
+        body: `<strong>${contribution.toFixed(1)} combined K+A per game</strong> (${avgK.toFixed(1)}K + ${avgA.toFixed(1)}A). You're involved in a lot of kills — either getting them or setting them up.`
+      });
+    } else if (contribution < 14) {
+      tendencies.push({
+        flag: 'bad',
+        title: 'Low engagement count',
+        body: `Only <strong>${contribution.toFixed(1)} combined K+A per game</strong>. You're missing fights — either map-rotating away from action or holding too passive.`
+      });
+      recs.push(`<strong>Get into more fights.</strong> Your K+A is low, meaning you're not involved in enough engagements. Push for power positions, rotate toward gunfire, and stop yielding ground.`);
+    }
+  }
+
+  // === 10. Assist consistency in wins ===
+  // High assists in wins specifically = you're a teamfight enabler
+  if (wins.length >= 3) {
+    const wA = mean(wins, 'Assists');
+    const wK = mean(wins, 'Kills');
+    if (wA >= 10 && wA / wK >= 0.8) {
+      tendencies.push({
+        flag: 'good',
+        title: 'Wins built on teamwork',
+        body: `In wins you average <strong>${wA.toFixed(1)} assists</strong> alongside ${wK.toFixed(1)} kills (${(wA/wK).toFixed(2)} A/K). Your victories are team efforts, not solo carries.`
+      });
+    }
+  }
+
+  // --- Render ---
+  let html = '';
+  if (tendencies.length === 0) {
+    html += '<div class="empty-state">No strong patterns detected at this filter scope. Try widening the filter or playing more games.</div>';
+  } else {
+    html += '<div class="tendencies-grid">';
+    for (const t of tendencies) {
+      html += `<div class="tendency-item flag-${t.flag}">
+        <p class="tendency-title">${t.title}</p>
+        <p class="tendency-body">${t.body}</p>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  if (recs.length > 0) {
+    html += '<h4 style="font-family: var(--font-display); font-size: 12px; letter-spacing: 3px; color: var(--accent); margin: 18px 0 10px; text-transform: uppercase;">Recommendations</h4>';
+    html += '<ul class="recs-list">';
+    for (const r of recs) html += `<li>${r}</li>`;
+    html += '</ul>';
+  }
+  return html;
+}
+
+// Driver: place Current (rolling 25) + Filtered (only when a filter is active)
+function renderTendencies(filteredGames) {
+  const ROLLING_N = 25;
+  const recent25 = allGames.slice(-ROLLING_N);
+  const currentHTML = computeTendenciesHTML(recent25);
+  document.getElementById('tendencies-overall-content').innerHTML = currentHTML;
+  document.getElementById('tendencies-overall-sub').textContent =
+    `Patterns from your last ${recent25.length} games — rolling window, never affected by filters.`;
+
+  const wrap = document.getElementById('tendencies-wrap');
+  const filteredCard = document.getElementById('tendencies-filtered-card');
+  const anyFilter = selectedMaps.size > 0 || selectedGameTypes.size > 0 || selectedOutcome !== 'all';
+
+  if (anyFilter) {
+    filteredCard.style.display = '';
+    wrap.classList.remove('solo');
+    const filteredHTML = computeTendenciesHTML(filteredGames);
+    document.getElementById('tendencies-filtered-content').innerHTML = filteredHTML;
+    document.getElementById('tendencies-filtered-title').textContent =
+      `⟢ Filtered · ${describeScope()}`;
+    document.getElementById('tendencies-filtered-sub').textContent =
+      `Patterns from ${filteredGames.length} games matching your filter.`;
+  } else {
+    filteredCard.style.display = 'none';
+    wrap.classList.add('solo');
+  }
+}
+
+function describeScope() {
+  const mapDesc = selectedMaps.size === 0 ? 'All maps'
+    : selectedMaps.size === 1 ? [...selectedMaps][0]
+    : `${selectedMaps.size} maps`;
+  const typeDesc = selectedGameTypes.size === 0 ? null
+    : selectedGameTypes.size === 1 ? [...selectedGameTypes][0]
+    : `${selectedGameTypes.size} types`;
+  const outDesc = selectedOutcome === 'all' ? null
+    : selectedOutcome === 'W' ? 'Wins' : 'Losses';
+  return [mapDesc, typeDesc, outDesc].filter(Boolean).join(' · ');
+}
+
+// ===========================================================================
+// RECENT FORM — last 10 games in the current filter, with deltas vs full filter avg
+// ===========================================================================
+function renderRecentForm(filteredGames) {
+  const N = 25;
+  const grid = document.getElementById('recent-mini-grid');
+  const title = document.getElementById('recent-form-title');
+  const sub = document.getElementById('recent-form-sub');
+
+  if (!filteredGames || filteredGames.length === 0) {
+    grid.innerHTML = '<div class="empty-state">No games in current filter.</div>';
+    if (charts.recent) { charts.recent.destroy(); charts.recent = null; }
+    if (charts.recentKad) { charts.recentKad.destroy(); charts.recentKad = null; }
+    return;
+  }
+
+  const recent = filteredGames.slice(-N);
+  const actualN = recent.length;
+  title.textContent = `Recent Form · Last ${actualN}`;
+  sub.textContent = actualN < N
+    ? `Only ${actualN} game${actualN===1?'':'s'} in this filter. Δ shows change vs your filter average.`
+    : `Last ${N} games in the current filter. Δ shows change vs your full filter average.`;
+
+  // Compute recent + baseline (full filter)
+  const mean = (arr, k) => arr.length ? arr.reduce((s,g) => s+g[k], 0) / arr.length : 0;
+  const winRate = arr => arr.length ? arr.filter(g=>g.Result==='W').length / arr.length * 100 : 0;
+
+  const recentKD = mean(recent, 'Ratio');
+  const recentK = mean(recent, 'Kills');
+  const recentD = mean(recent, 'Deaths');
+  const recentA = mean(recent, 'Assists');
+  const recentWR = winRate(recent);
+  const recentMarginPct = recent.reduce((s,g) => s+marginPct(g), 0) / recent.length;
+
+  const baseKD = mean(filteredGames, 'Ratio');
+  const baseK = mean(filteredGames, 'Kills');
+  const baseD = mean(filteredGames, 'Deaths');
+  const baseA = mean(filteredGames, 'Assists');
+  const baseWR = winRate(filteredGames);
+  const baseMarginPct = filteredGames.reduce((s,g) => s+marginPct(g), 0) / filteredGames.length;
+
+  // Arrow tracks which way the *number* moved; color tracks whether that's good or bad.
+  // For deaths, lower is better — so a downward arrow with green color means "fewer deaths = good".
+  function deltaHTML(recent, base, decimals=2, lowerIsBetter=false, suffix='') {
+    const d = recent - base;
+    const absD = Math.abs(d);
+    const threshold = decimals === 0 ? 0.5 : 0.05;
+    let cls, arrow;
+    if (absD < threshold) {
+      cls = 'flat'; arrow = '◆';
+    } else {
+      // Arrow always reflects which way the value moved
+      arrow = d > 0 ? '▲' : '▼';
+      // Color reflects whether that direction is good for this metric
+      const isGood = (d > 0) !== lowerIsBetter;
+      cls = isGood ? 'up' : 'down';
+    }
+    const sign = d >= 0 ? '+' : '';
+    return `<p class="delta ${cls}">${arrow} ${sign}${d.toFixed(decimals)}${suffix} vs avg</p>`;
+  }
+
+  grid.innerHTML = `
+    <div class="recent-mini">
+      <p class="lbl">Win rate</p>
+      <p class="val">${recentWR.toFixed(0)}%</p>
+      ${deltaHTML(recentWR, baseWR, 0, false, 'pp')}
+    </div>
+    <div class="recent-mini">
+      <p class="lbl">Avg K/D</p>
+      <p class="val">${recentKD.toFixed(2)}</p>
+      ${deltaHTML(recentKD, baseKD, 2)}
+    </div>
+    <div class="recent-mini">
+      <p class="lbl">Avg kills</p>
+      <p class="val">${recentK.toFixed(1)}</p>
+      ${deltaHTML(recentK, baseK, 1)}
+    </div>
+    <div class="recent-mini">
+      <p class="lbl">Avg deaths</p>
+      <p class="val">${recentD.toFixed(1)}</p>
+      ${deltaHTML(recentD, baseD, 1, true)}
+    </div>
+    <div class="recent-mini">
+      <p class="lbl">Avg assists</p>
+      <p class="val">${recentA.toFixed(1)}</p>
+      ${deltaHTML(recentA, baseA, 1)}
+    </div>
+    <div class="recent-mini">
+      <p class="lbl">Avg margin</p>
+      <p class="val" style="color:${recentMarginPct >= 0 ? 'var(--hud-bright)' : '#ffaab2'};">${recentMarginPct >= 0 ? '+' : ''}${recentMarginPct.toFixed(0)}%</p>
+      ${deltaHTML(recentMarginPct, baseMarginPct, 0, false, 'pp')}
+    </div>
+  `;
+
+  // Chart: K/D line + margin% bars colored by W/L
+  const labels = recent.map(g => `G${g.Game}`);
+  const ratios = recent.map(g => g.Ratio);
+  const margins = recent.map(g => marginPct(g));
+  const barColors = recent.map(g => g.Result === 'W' ? C.hud : C.loss);
+
+  if (charts.recent) charts.recent.destroy();
+  charts.recent = new Chart(document.getElementById('ch_recent'), {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Margin (% of cap)',
+          data: margins,
+          backgroundColor: barColors,
+          yAxisID: 'yMargin',
+          order: 2,
+        },
+        {
+          type: 'line',
+          label: 'K/D',
+          data: ratios,
+          borderColor: C.accent,
+          backgroundColor: 'transparent',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: C.accent,
+          tension: 0.25,
+          yAxisID: 'yKD',
+          order: 1,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            title: (ctxs) => {
+              const idx = ctxs[0].dataIndex;
+              const g = recent[idx];
+              return `Game ${g.Game} · ${g.Map}`;
+            },
+            label: (ctx) => {
+              const g = recent[ctx.dataIndex];
+              if (ctx.dataset.label === 'K/D') {
+                return `K/D: ${g.Ratio.toFixed(2)}`;
+              }
+              return [
+                `Result: ${g.Result}`,
+                `Score: ${g['Good Guys']}–${g['Bad Guys']}`,
+                `K/A/D: ${g.Kills}/${g.Assists}/${g.Deaths}`,
+                `Margin: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(0)}% of cap`
+              ];
+            }
+          }
+        },
+        annotation: {
+          annotations: {
+            kdEven: {
+              type: 'line', yMin: 1.0, yMax: 1.0,
+              borderColor: '#d4af37', borderWidth: 2, borderDash: [4, 4],
+              yScaleID: 'yKD'
+            }
+          }
+        }
+      },
+      scales: {
+        yKD: {
+          type: 'linear', position: 'left',
+          title: { display: true, text: 'K/D' },
+          min: 0, max: Math.max(4, Math.ceil(Math.max(...ratios, 2) * 1.15)),
+          grid: { color: 'rgba(92,225,255,0.08)' }
+        },
+        yMargin: {
+          type: 'linear', position: 'right',
+          title: { display: true, text: 'Margin (% of cap)' },
+          min: -100, max: 100,
+          grid: { display: false }
+        },
+        x: { title: { display: true, text: 'Game #' }, ticks: { autoSkip: true, maxTicksLimit: 12 } }
+      }
+    }
+  });
+
+  // K/A/D trend chart — three lines
+  const kVals = recent.map(g => g.Kills);
+  const aVals = recent.map(g => g.Assists);
+  const dVals = recent.map(g => g.Deaths);
+
+  if (charts.recentKad) charts.recentKad.destroy();
+  charts.recentKad = new Chart(document.getElementById('ch_recent_kad'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Kills',
+          data: kVals,
+          borderColor: C.hud,
+          backgroundColor: 'transparent',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: C.hud,
+          tension: 0.25,
+        },
+        {
+          label: 'Assists',
+          data: aVals,
+          borderColor: C.accent,
+          backgroundColor: 'transparent',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: C.accent,
+          tension: 0.25,
+        },
+        {
+          label: 'Deaths',
+          data: dVals,
+          borderColor: C.loss,
+          backgroundColor: 'transparent',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: C.loss,
+          tension: 0.25,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            title: (ctxs) => {
+              const idx = ctxs[0].dataIndex;
+              const g = recent[idx];
+              return `Game ${g.Game} · ${g.Map}`;
+            }
+          }
+        }
+      },
+      scales: {
+        y: { title: { display: true, text: 'Count' }, beginAtZero: true },
+        x: { title: { display: true, text: 'Game #' }, ticks: { autoSkip: true, maxTicksLimit: 12 } }
+      }
+    }
+  });
+}
+
+// ===========================================================================
+// ALL-TIME BESTS — single records & map/team leaders across the full dataset
+// ===========================================================================
+function renderAllTimeBests() {
+  const grid = document.getElementById('all-time-grid');
+  if (!allGames || allGames.length === 0) {
+    grid.innerHTML = '<div class="empty-state">No games loaded.</div>';
+    return;
+  }
+
+  // Single-game records — pick the max for each
+  const mostKills = allGames.reduce((b, g) => g.Kills > b.Kills ? g : b);
+  const mostDeaths = allGames.reduce((b, g) => g.Deaths > b.Deaths ? g : b);
+  const mostAssists = allGames.reduce((b, g) => g.Assists > b.Assists ? g : b);
+
+  // Map win-rate leaders — require ≥3 games so flukes don't dominate
+  const MIN_GAMES = 3;
+  const byMap = {};
+  allGames.forEach(g => {
+    if (!byMap[g.Map]) byMap[g.Map] = [];
+    byMap[g.Map].push(g);
+  });
+  const mapRows = Object.entries(byMap)
+    .map(([map, gs]) => ({
+      map, n: gs.length,
+      wins: gs.filter(g => g.Result === 'W').length,
+      wr: gs.filter(g => g.Result === 'W').length / gs.length * 100
+    }))
+    .filter(r => r.n >= MIN_GAMES);
+
+  let bestMap, worstMap;
+  if (mapRows.length > 0) {
+    bestMap = mapRows.reduce((b, r) => r.wr > b.wr ? r : b);
+    worstMap = mapRows.reduce((b, r) => r.wr < b.wr ? r : b);
+  }
+
+  // Team side: Red vs Blue, pick whichever has the higher win rate
+  const redG = allGames.filter(g => g.Team === 'Red');
+  const blueG = allGames.filter(g => g.Team === 'Blue');
+  const redWR = redG.length ? redG.filter(g => g.Result === 'W').length / redG.length * 100 : 0;
+  const blueWR = blueG.length ? blueG.filter(g => g.Result === 'W').length / blueG.length * 100 : 0;
+  const bestTeam = redWR >= blueWR
+    ? { team: 'Red', wr: redWR, n: redG.length, color: '#ff8888' }
+    : { team: 'Blue', wr: blueWR, n: blueG.length, color: '#88ccff' };
+
+  const bestItem = (label, primary, sub) => `
+    <div class="all-time-item">
+      <p class="at-lbl">${label}</p>
+      <p class="at-val">${primary}</p>
+      <p class="at-sub">${sub}</p>
+    </div>`;
+
+  let html = '';
+  html += bestItem('Most kills', `${mostKills.Kills}`, `Game ${mostKills.Game} · ${mostKills.Map} · ${mostKills.Result}`);
+  html += bestItem('Most deaths', `${mostDeaths.Deaths}`, `Game ${mostDeaths.Game} · ${mostDeaths.Map} · ${mostDeaths.Result}`);
+  html += bestItem('Most assists', `${mostAssists.Assists}`, `Game ${mostAssists.Game} · ${mostAssists.Map} · ${mostAssists.Result}`);
+  if (bestMap) {
+    html += bestItem('Best map (WR)', bestMap.map, `${bestMap.wr.toFixed(0)}% · ${bestMap.wins}/${bestMap.n} games`);
+  }
+  if (worstMap && worstMap.map !== bestMap?.map) {
+    html += bestItem('Worst map (WR)', worstMap.map, `${worstMap.wr.toFixed(0)}% · ${worstMap.wins}/${worstMap.n} games`);
+  }
+  html += `<div class="all-time-item">
+      <p class="at-lbl">Best team side</p>
+      <p class="at-val" style="color:${bestTeam.color};">${bestTeam.team}</p>
+      <p class="at-sub">${bestTeam.wr.toFixed(0)}% WR · ${bestTeam.n} games</p>
+    </div>`;
+
+  grid.innerHTML = html;
+}
+
+// ===========================================================================
+// GAME TYPE COMPARISON — side-by-side performance for each game type
+// ===========================================================================
+function renderGameTypeComparison(games) {
+  const grid = document.getElementById('gametype-compare-grid');
+  const sub = document.getElementById('gametype-compare-sub');
+  if (!games || games.length === 0) {
+    grid.innerHTML = '<div class="empty-state">No games match this filter.</div>';
+    if (sub) sub.textContent = 'No games to analyze.';
+    return;
+  }
+
+  const anyFilter = selectedMaps.size > 0 || selectedGameTypes.size > 0 || selectedOutcome !== 'all';
+  if (sub) {
+    sub.textContent = anyFilter
+      ? `Side-by-side performance for each game type, within your current filter (${games.length} games).`
+      : `Side-by-side performance for each game type. From your full dataset.`;
+  }
+
+  // Group games by type
+  const byType = {};
+  games.forEach(g => {
+    const t = g['Game Type'] || '(unspecified)';
+    if (!byType[t]) byType[t] = [];
+    byType[t].push(g);
+  });
+
+  const mean = (arr, k) => arr.length ? arr.reduce((s,g) => s+g[k], 0) / arr.length : 0;
+
+  // Build a card per type
+  const cards = Object.entries(byType)
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([type, gs]) => {
+      const wins = gs.filter(g => g.Result === 'W').length;
+      const wr = wins / gs.length * 100;
+      const kd = mean(gs, 'Ratio');
+      const k = mean(gs, 'Kills');
+      const a = mean(gs, 'Assists');
+      const d = mean(gs, 'Deaths');
+      const marginP = gs.reduce((s,g) => s+marginPct(g), 0) / gs.length;
+
+      const wrColor = wr >= 60 ? 'var(--hud)' : wr >= 45 ? 'var(--hud-bright)' : '#ffaab2';
+      const kdColor = kd >= 1.2 ? 'var(--hud)' : kd >= 0.9 ? 'var(--hud-bright)' : '#ffaab2';
+
+      return `
+        <div class="gt-card">
+          <p class="gt-name">${type} · ${gs.length} games</p>
+          <div class="gt-row"><span class="lbl">Record</span><span class="val">${wins}-${gs.length - wins}</span></div>
+          <div class="gt-row"><span class="lbl">Win rate</span><span class="val" style="color:${wrColor};">${wr.toFixed(1)}%</span></div>
+          <div class="gt-row"><span class="lbl">Avg K/D</span><span class="val" style="color:${kdColor};">${kd.toFixed(2)}</span></div>
+          <div class="gt-row"><span class="lbl">K / A / D</span><span class="val">${k.toFixed(1)} / ${a.toFixed(1)} / ${d.toFixed(1)}</span></div>
+          <div class="gt-row"><span class="lbl">Avg margin</span><span class="val">${marginP >= 0 ? '+' : ''}${marginP.toFixed(0)}%</span></div>
+        </div>
+      `;
+    }).join('');
+
+  grid.innerHTML = cards;
+}
+
+// ===========================================================================
+// HALL OF FAME — rare achievements and oddities
+// ===========================================================================
+function renderHallOfFame() {
+  const grid = document.getElementById('hof-grid');
+  const sub = document.getElementById('hof-sub');
+  const games = allGames;
+  if (!games || games.length === 0) {
+    grid.innerHTML = '<div class="empty-state">No games loaded.</div>';
+    if (sub) sub.textContent = 'No games to analyze.';
+    return;
+  }
+
+  if (sub) {
+    sub.textContent = `Rare achievements, weird records, and bragging-rights stats from your full dataset.`;
+  }
+
+  const items = [];
+  const fmtGame = g => `Game ${g.Game} · ${g.Map}`;
+
+  // === Closest game ===
+  const closest = games.reduce((b, g) => Math.abs(g.Margin) < Math.abs(b.Margin) ? g : b);
+  items.push({
+    flag: 'trophy', icon: '◊',
+    label: 'Closest game',
+    val: `${closest['Good Guys']}–${closest['Bad Guys']}`,
+    sub: `${fmtGame(closest)} · ${closest.Result} by ${Math.abs(closest.Margin)}`
+  });
+
+  // === Biggest blowout win ===
+  const wins = games.filter(g => g.Result === 'W');
+  if (wins.length) {
+    const bigWin = wins.reduce((b, g) => g.Margin > b.Margin ? g : b);
+    items.push({
+      flag: 'trophy', icon: '★',
+      label: 'Biggest blowout win',
+      val: `+${bigWin.Margin} margin`,
+      sub: `${fmtGame(bigWin)} · ${bigWin['Good Guys']}–${bigWin['Bad Guys']}`
+    });
+  }
+
+  // === Biggest blowout loss ===
+  const losses = games.filter(g => g.Result === 'L');
+  if (losses.length) {
+    const bigLoss = losses.reduce((b, g) => g.Margin < b.Margin ? g : b);
+    items.push({
+      flag: 'shame', icon: '✗',
+      label: 'Worst blowout loss',
+      val: `${bigLoss.Margin} margin`,
+      sub: `${fmtGame(bigLoss)} · ${bigLoss['Good Guys']}–${bigLoss['Bad Guys']}`
+    });
+  }
+
+  // === Best K/D in a loss ===
+  if (losses.length) {
+    const bestInLoss = losses.reduce((b, g) => g.Ratio > b.Ratio ? g : b);
+    if (bestInLoss.Ratio >= 1.5) {
+      items.push({
+        flag: 'shame', icon: '⚔',
+        label: 'Best K/D in a loss',
+        val: `${bestInLoss.Ratio.toFixed(2)} K/D`,
+        sub: `${fmtGame(bestInLoss)} · ${bestInLoss.Kills}/${bestInLoss.Assists}/${bestInLoss.Deaths}`
+      });
+    }
+  }
+
+  // === Worst K/D in a win ===
+  if (wins.length) {
+    const worstInWin = wins.reduce((b, g) => g.Ratio < b.Ratio ? g : b);
+    if (worstInWin.Ratio <= 0.7) {
+      items.push({
+        flag: 'trophy', icon: '☂',
+        label: 'Carried hardest',
+        val: `${worstInWin.Ratio.toFixed(2)} K/D`,
+        sub: `${fmtGame(worstInWin)} · ${worstInWin.Kills}/${worstInWin.Assists}/${worstInWin.Deaths} (W)`
+      });
+    }
+  }
+
+  // === Fewest deaths ===
+  const minDeaths = Math.min(...games.map(g => g.Deaths));
+  const noDeathGames = games.filter(g => g.Deaths === minDeaths);
+  const fewestDeaths = noDeathGames[0];
+  items.push({
+    flag: 'trophy', icon: '✦',
+    label: minDeaths === 0 ? 'Untouchable (no deaths!)' : 'Fewest deaths in a game',
+    val: `${minDeaths} death${minDeaths===1?'':'s'}`,
+    sub: noDeathGames.length === 1
+      ? `${fmtGame(fewestDeaths)} · ${fewestDeaths.Kills}K/${fewestDeaths.Assists}A`
+      : `${noDeathGames.length} times`
+  });
+
+  // === Triple doubles ===
+  const tripleDoubles = games.filter(g => g.Kills >= 10 && g.Assists >= 10 && g.Deaths >= 10);
+  if (tripleDoubles.length > 0) {
+    items.push({
+      flag: 'trophy', icon: '⚉',
+      label: 'Triple doubles',
+      val: `${tripleDoubles.length} game${tripleDoubles.length===1?'':'s'}`,
+      sub: '10+ kills, assists, and deaths in one game'
+    });
+  }
+
+  // === Longest win / loss streak ===
+  let curStreak = 0, longestW = 0, longestL = 0, curType = null;
+  let longestWEndGame = null, longestLEndGame = null;
+  games.forEach(g => {
+    if (g.Result === curType) {
+      curStreak++;
+    } else {
+      curType = g.Result;
+      curStreak = 1;
+    }
+    if (curType === 'W' && curStreak > longestW) {
+      longestW = curStreak; longestWEndGame = g.Game;
+    }
+    if (curType === 'L' && curStreak > longestL) {
+      longestL = curStreak; longestLEndGame = g.Game;
+    }
+  });
+  if (longestW >= 1) {
+    items.push({
+      flag: 'trophy', icon: '⚝',
+      label: 'Longest win streak',
+      val: `${longestW} win${longestW===1?'':'s'}`,
+      sub: longestWEndGame ? `ending Game ${longestWEndGame}` : ''
+    });
+  }
+  if (longestL >= 3) {
+    items.push({
+      flag: 'shame', icon: '☠',
+      label: 'Longest loss streak',
+      val: `${longestL} losses`,
+      sub: `ending Game ${longestLEndGame}`
+    });
+  }
+
+  // === Most kills in a single game ===
+  const mostKillsG = games.reduce((b, g) => g.Kills > b.Kills ? g : b);
+  items.push({
+    flag: 'trophy', icon: '☉',
+    label: `Best kills`,
+    val: `${mostKillsG.Kills} in one game`,
+    sub: `${fmtGame(mostKillsG)} · ${mostKillsG.Result}`
+  });
+
+  // === Highest K/D ===
+  const bestKD = games.reduce((b, g) => g.Ratio > b.Ratio ? g : b);
+  items.push({
+    flag: 'trophy', icon: '⚡',
+    label: `Highest K/D`,
+    val: `${bestKD.Ratio.toFixed(2)} K/D`,
+    sub: `${fmtGame(bestKD)} · ${bestKD.Kills}K/${bestKD.Deaths}D · ${bestKD.Result}`
+  });
+
+  // === Body count totals ===
+  const totalK = games.reduce((s,g) => s+g.Kills, 0);
+  const totalD = games.reduce((s,g) => s+g.Deaths, 0);
+  const totalA = games.reduce((s,g) => s+g.Assists, 0);
+  items.push({
+    flag: 'neutral', icon: '⚔',
+    label: 'Lifetime body count',
+    val: `${totalK.toLocaleString()} kills`,
+    sub: `${totalA.toLocaleString()} assists · ${totalD.toLocaleString()} deaths`
+  });
+
+  grid.innerHTML = items.map(it => `
+    <div class="hof-item flag-${it.flag}">
+      <p class="hof-lbl"><span class="icon">${it.icon}</span>${it.label}</p>
+      <p class="hof-val">${it.val}</p>
+      <p class="hof-sub">${it.sub}</p>
+    </div>
+  `).join('');
+}
+
+// ===========================================================================
+// OVERALL METRICS — filter-blind, always reflects your full dataset
+// ===========================================================================
+function renderOverallMetrics() {
+  const el = document.getElementById('top-metrics');
+  if (!allGames || allGames.length === 0) {
+    el.innerHTML = '<div class="empty-state">No games loaded.</div>';
+    return;
+  }
+  const games = allGames;
+  const wins = games.filter(g => g.Result === 'W').length;
+  const losses = games.length - wins;
+  const wr = wins / games.length * 100;
+  const totalKills = games.reduce((s,g) => s+g.Kills, 0);
+  const avgK = games.reduce((s,g) => s+g.Kills, 0) / games.length;
+  const avgA = games.reduce((s,g) => s+g.Assists, 0) / games.length;
+  const avgD = games.reduce((s,g) => s+g.Deaths, 0) / games.length;
+  const avgKD = games.reduce((s,g) => s+g.Ratio, 0) / games.length;
+  const sortedKD = [...games].map(g => g.Ratio).sort((a,b) => a-b);
+  const medianKD = sortedKD[Math.floor(sortedKD.length / 2)];
+  const avgMargin = games.reduce((s,g) => s+g.Margin, 0) / games.length;
+  const avgMarginPct = games.reduce((s,g) => s+marginPct(g), 0) / games.length;
+
+  el.innerHTML = `
+    <div class="metric-card">
+      <p class="metric-label">Games played</p>
+      <p class="metric-value">${games.length}</p>
+      <p class="metric-sub">lifetime total</p>
+      <div class="tooltip">
+        <h4>Games Played</h4>
+        <p>Total number of games in your dataset, lifetime.</p>
+      </div>
+    </div>
+    <div class="metric-card">
+      <p class="metric-label">Record</p>
+      <p class="metric-value">${wins}-${losses}</p>
+      <p class="metric-sub">${wr.toFixed(1)}% win rate</p>
+      <div class="tooltip">
+        <h4>Record</h4>
+        <p>Your lifetime win-loss tally — wins on the left, losses on the right.</p>
+        <p class="example">Win rate = wins ÷ total games. 50% = even, &gt;50% = winning more than losing.</p>
+      </div>
+    </div>
+    <div class="metric-card">
+      <p class="metric-label">Score margin</p>
+      <p class="metric-value" style="color:${avgMargin >= 0 ? 'var(--hud-bright)' : '#ffaab2'};">${avgMargin >= 0 ? '+' : ''}${avgMargin.toFixed(1)}</p>
+      <p class="metric-sub">${avgMarginPct >= 0 ? '+' : ''}${avgMarginPct.toFixed(1)}% of cap · avg per game</p>
+      <div class="tooltip">
+        <h4>Score Margin</h4>
+        <p>Your team's score minus the enemy team's score, averaged across all games lifetime.</p>
+        <p>The "% of cap" subtitle normalizes for game type: a +10 margin means much more in 4v4 (cap 50) than in 8v8 (cap 100).</p>
+        <p class="example">+20 = usually winning comfortably · 0 = close games · −20 = usually losing.</p>
+      </div>
+    </div>
+    <div class="metric-card tip-left">
+      <p class="metric-label">Total kills</p>
+      <p class="metric-value">${totalKills.toLocaleString()}</p>
+      <p class="metric-sub">${avgK.toFixed(1)} avg per game</p>
+      <div class="tooltip">
+        <h4>Total Kills</h4>
+        <p>Your cumulative kill count across all games lifetime.</p>
+        <p class="example">Lifetime damage dealt. The big-picture body count.</p>
+      </div>
+    </div>
+    <div class="metric-card tip-left">
+      <p class="metric-label">Avg K/D</p>
+      <p class="metric-value">${avgKD.toFixed(2)}</p>
+      <p class="metric-sub">median ${medianKD.toFixed(2)}</p>
+      <div class="tooltip">
+        <h4>Average K/D Ratio</h4>
+        <p>The mean of your kill-to-death ratios across each game, lifetime.</p>
+        <p>Median is shown alongside because K/D is right-skewed — one blowout game can pull the mean way up.</p>
+        <p class="example">1.0 = even trades · &gt;1.0 = positive trader · &lt;1.0 = giving up more kills than getting.</p>
+      </div>
+    </div>
+    <div class="metric-card tip-left">
+      <p class="metric-label">K / A / D</p>
+      <p class="metric-value">${avgK.toFixed(1)} / ${avgA.toFixed(1)} / ${avgD.toFixed(1)}</p>
+      <p class="metric-sub">per game</p>
+      <div class="tooltip">
+        <h4>Kills / Assists / Deaths</h4>
+        <p>Your average per-game stat line, lifetime.</p>
+        <p class="example">Assists matter more than they look — high assists with mid kills usually means you're playing strong team-support.</p>
+      </div>
+    </div>
+  `;
+}
+
+function render() {
+  const games = getFilteredGames();
+
+  // === OVERALL METRICS (filter-blind, always from allGames) ===
+  renderOverallMetrics();
+
+  if (games.length === 0) {
+    // Filter narrowed to nothing — clear the filter-dependent sections but keep Overall metrics intact
+    if (charts.recent) { charts.recent.destroy(); charts.recent = null; }
+    if (charts.recentKad) { charts.recentKad.destroy(); charts.recentKad = null; }
+    document.getElementById('recent-mini-grid').innerHTML = '<div class="empty-state">No games match this filter.</div>';
+    document.getElementById('tendencies-overall-content').innerHTML = '<div class="empty-state">No games match this filter.</div>';
+    document.getElementById('hof-grid') && renderHallOfFame();
+    renderAllTimeBests();
+    return;
+  }
+
+  const mapDesc = selectedMaps.size === 0 ? 'all maps'
+    : selectedMaps.size === 1 ? [...selectedMaps][0]
+    : `${selectedMaps.size} maps`;
+  const typeDesc = selectedGameTypes.size === 0 ? 'all types'
+    : selectedGameTypes.size === 1 ? [...selectedGameTypes][0]
+    : `${selectedGameTypes.size} types`;
+  const outcomeDesc = selectedOutcome === 'all' ? null
+    : selectedOutcome === 'W' ? 'wins only' : 'losses only';
+  // Build a compact description, omitting the trivial "all X" parts when a more specific filter is active
+  const parts = [];
+  if (selectedMaps.size > 0) parts.push(mapDesc); else parts.push('all maps');
+  if (selectedGameTypes.size > 0) parts.push(typeDesc);
+  if (outcomeDesc) parts.push(outcomeDesc);
+  const filterDesc = parts.join(' · ');
+
+  const anyFilterActive = selectedMaps.size > 0 || selectedGameTypes.size > 0 || selectedOutcome !== 'all';
+  document.getElementById('trend-title').textContent =
+    anyFilterActive ? `K/D over time · ${filterDesc}` : 'K/D over time';
+
+  renderTendencies(games);
+  renderRecentForm(games);
+  renderAllTimeBests();
+  renderGameTypeComparison(games);
+  renderHallOfFame();
+  document.getElementById('log-sub').textContent = `${games.length} games shown · ${filterDesc}`;
+
+  const labels = games.map(g => g.Game);
+  const ratios = games.map(g => g.Ratio);
+  const rolling = ratios.map((_, i) => {
+    const slice = ratios.slice(Math.max(0, i - 4), i + 1);
+    return +(slice.reduce((a,b)=>a+b,0)/slice.length).toFixed(2);
+  });
+
+  // Fixed y-axis range: 0.0 to 20.0
+  const yMin = 0;
+  const yMax = 20;
+
+  // Clip outlier values to the visible range so the line stays continuous.
+  const clipped = ratios.map(r => Math.max(yMin, Math.min(yMax, r)));
+  const clippedRolling = rolling.map(r => Math.max(yMin, Math.min(yMax, r)));
+
+  if (charts.kd) charts.kd.destroy();
+  charts.kd = new Chart(document.getElementById('ch_kd_time'), {
+    type: 'line',
+    data: { labels, datasets: [
+      {
+        label: 'K/D',
+        data: clipped,
+        borderColor: C.neutralLine,
+        backgroundColor: 'transparent',
+        borderWidth: 1,
+        pointRadius: 2,
+        rawValues: ratios,
+      },
+      {
+        label: 'Rolling avg (5)',
+        data: clippedRolling,
+        borderColor: C.accent,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+        rawValues: rolling,
+      }
+    ]},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            // Show "Game N" on the title line
+            title: (ctxs) => `Game ${ctxs[0].label}`,
+            // Multi-line body: Map / Result / blank / K / D / A
+            label: (ctx) => {
+              const raw = ctx.dataset.rawValues ? ctx.dataset.rawValues[ctx.dataIndex] : ctx.parsed.y;
+              // Only show full game details on the K/D series, not on the rolling avg
+              if (ctx.dataset.label === 'K/D') {
+                const g = games[ctx.dataIndex];
+                return [
+                  `Map: ${g.Map}`,
+                  `Result: ${g.Result}`,
+                  ``,
+                  `K: ${g.Kills}`,
+                  `D: ${g.Deaths}`,
+                  `A: ${g.Assists}`,
+                  ``,
+                  `K/D: ${raw.toFixed(2)}`
+                ];
+              }
+              return `Rolling avg (5): ${raw.toFixed(2)}`;
+            }
+          }
+        },
+        annotation: {
+          annotations: {
+            evenLine: {
+              type: 'line', yMin: 1.0, yMax: 1.0,
+              borderColor: '#d4af37', borderWidth: 2, borderDash: [4, 4]
+            }
+          }
+        }
+      },
+      scales: {
+        y: { title: { display: true, text: 'K/D' }, min: yMin, max: yMax },
+        x: { title: { display: true, text: 'Game #' } }
+      }
+    }
+  });
+
+  function hist(values, bins) {
+    const counts = new Array(bins.length - 1).fill(0);
+    values.forEach(v => { for (let i = 0; i < bins.length - 1; i++) { if (v >= bins[i] && v < bins[i+1]) { counts[i]++; break; } } });
+    return counts;
+  }
+  const kbins = [0,3,6,9,12,15,18,25];
+  const abins = [0,3,6,9,12,15,18,25];
+  const dbins = [0,3,6,9,12,15,18,25];
+  const labels7 = ['0-2','3-5','6-8','9-11','12-14','15-17','18+'];
+
+  if (charts.kdist) charts.kdist.destroy();
+  charts.kdist = new Chart(document.getElementById('ch_kdist'), {
+    type: 'bar',
+    data: { labels: labels7, datasets: [{ data: hist(games.map(g=>g.Kills), kbins), backgroundColor: C.hud }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+  if (charts.adist) charts.adist.destroy();
+  charts.adist = new Chart(document.getElementById('ch_adist'), {
+    type: 'bar',
+    data: { labels: labels7, datasets: [{ data: hist(games.map(g=>g.Assists), abins), backgroundColor: C.accent }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+  if (charts.ddist) charts.ddist.destroy();
+  charts.ddist = new Chart(document.getElementById('ch_ddist'), {
+    type: 'bar',
+    data: { labels: labels7, datasets: [{ data: hist(games.map(g=>g.Deaths), dbins), backgroundColor: C.loss }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+
+  const logRows = [...games].reverse();
+  document.getElementById('match-log').innerHTML = `
+    <thead><tr>
+      <th>Game</th><th>Map</th><th>Side</th><th>Result</th><th>Score</th><th>K</th><th>A</th><th>D</th><th>K/D</th>
+    </tr></thead>
+    <tbody>${logRows.map(g => {
+      const pill = g.Result === 'W' ? '<span class="pill pill-w">W</span>' : '<span class="pill pill-l">L</span>';
+      return `<tr>
+        <td>${g.Game}</td>
+        <td>${g.Map}</td>
+        <td style="color:${g.Team === 'Red' ? '#ff8888' : '#88ccff'};">${g.Team}</td>
+        <td>${pill}</td>
+        <td>${g['Good Guys']}–${g['Bad Guys']} <span style="color:var(--muted);">(${g.Margin >= 0 ? '+' : ''}${g.Margin})</span></td>
+        <td>${g.Kills}</td><td>${g.Assists}</td><td>${g.Deaths}</td>
+        <td>${g.Ratio.toFixed(2)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+}
+
+// ============================================================================
+// TABS
+// ============================================================================
+let currentTab = 'overview';
+function showTab(name) {
+  if (name !== 'analysis') name = 'overview';
+  currentTab = name;
+  document.getElementById('view-overview').style.display = name === 'overview' ? '' : 'none';
+  document.getElementById('view-analysis').style.display = name === 'analysis' ? '' : 'none';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  try { localStorage.setItem('haloTab', name); } catch (e) {}
+  if (name === 'analysis') renderAnalysis();
+}
+
+// ============================================================================
+// MAP & SIDE ANALYSIS TAB (own filters, independent of the Overview filters)
+// ============================================================================
+const az = { map: null, team: 'all', types: new Set(), sort: { key: 'n', dir: -1 } };
+const AZ_MIN = 5;           // min games before a map counts in rankings
+const AZ_RED = '#ff8080', AZ_BLUE = '#80c4ff';
+
+function azEsc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function azStats(games) {
+  const n = games.length;
+  if (!n) return { n: 0 };
+  const sum = k => games.reduce((a, g) => a + (+g[k] || 0), 0);
+  const w = games.filter(g => g.Result === 'W').length;
+  const K = sum('Kills'), A = sum('Assists'), D = sum('Deaths');
+  return {
+    n, w, l: n - w, wr: w / n * 100,
+    kd: D > 0 ? K / D : K,
+    k: K / n, a: A / n, d: D / n,
+    diff: sum('Diff') / n,
+    margin: games.reduce((a, g) => a + marginPct(g), 0) / n,
+  };
+}
+const azPct = v => (v == null || isNaN(v)) ? '—' : Math.round(v) + '%';
+const az2 = v => (v == null || isNaN(v)) ? '—' : v.toFixed(2);
+const az1 = v => (v == null || isNaN(v)) ? '—' : v.toFixed(1);
+const azSigned = (v, digits = 1) => (v >= 0 ? '+' : '') + v.toFixed(digits);
+
+function azBase() {
+  return az.types.size ? allGames.filter(g => az.types.has(g['Game Type'])) : allGames;
+}
+function azSelection(base) {
+  return base.filter(g => (!az.map || g.Map === az.map) && (az.team === 'all' || g.Team === az.team));
+}
+function azWrBg(s) {
+  if (!s || !s.n) return 'transparent';
+  const dist = Math.min(1, Math.abs(s.wr - 50) / 50);
+  const a = (0.08 + dist * 0.45) * (s.n < AZ_MIN ? 0.5 : 1);
+  return s.wr >= 50 ? `rgba(127,255,0,${a.toFixed(2)})` : `rgba(255,64,64,${a.toFixed(2)})`;
+}
+
+function renderAnalysisFilters() {
+  const base = azBase();
+  const counts = {};
+  base.forEach(g => counts[g.Map] = (counts[g.Map] || 0) + 1);
+  const maps = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  if (az.map && !counts[az.map]) az.map = null;
+
+  document.getElementById('az-map-chips').innerHTML =
+    `<button class="map-chip ${az.map ? '' : 'active'}" data-map="">All Maps <span class="n">×${base.length}</span></button>` +
+    maps.map(m => `<button class="map-chip ${az.map === m ? 'active' : ''}" data-map="${azEsc(m)}">${azEsc(m)} <span class="n">×${counts[m]}</span></button>`).join('');
+  document.querySelectorAll('#az-map-chips .map-chip').forEach(btn => btn.addEventListener('click', () => {
+    const m = btn.dataset.map || null;
+    az.map = (m && az.map === m) ? null : m;
+    renderAnalysis();
+  }));
+
+  const sideCount = t => base.filter(g => g.Team === t).length;
+  document.getElementById('az-team-chips').innerHTML = [
+    ['all', 'Both Sides', base.length, ''],
+    ['Red', 'Red', sideCount('Red'), 'chip-red'],
+    ['Blue', 'Blue', sideCount('Blue'), 'chip-blue'],
+  ].map(([v, lbl, n, cls]) => `<button class="map-chip ${cls} ${az.team === v ? 'active' : ''}" data-team="${v}">${lbl} <span class="n">×${n}</span></button>`).join('');
+  document.querySelectorAll('#az-team-chips .map-chip').forEach(btn => btn.addEventListener('click', () => {
+    az.team = btn.dataset.team;
+    renderAnalysis();
+  }));
+
+  const typeCounts = {};
+  allGames.forEach(g => typeCounts[g['Game Type']] = (typeCounts[g['Game Type']] || 0) + 1);
+  document.getElementById('az-type-chips').innerHTML =
+    `<button class="map-chip ${az.types.size ? '' : 'active'}" data-type="">All Types <span class="n">×${allGames.length}</span></button>` +
+    allGameTypes.map(t => `<button class="map-chip ${az.types.has(t) ? 'active' : ''}" data-type="${azEsc(t)}">${azEsc(t)} <span class="n">×${typeCounts[t] || 0}</span></button>`).join('');
+  document.querySelectorAll('#az-type-chips .map-chip').forEach(btn => btn.addEventListener('click', () => {
+    const t = btn.dataset.type;
+    if (!t) az.types.clear();
+    else if (az.types.has(t)) az.types.delete(t);
+    else az.types.add(t);
+    renderAnalysis();
+  }));
+}
+
+function azMetricCard(label, value, sub) {
+  return `<div class="metric-card"><p class="metric-label">${label}</p><p class="metric-value">${value}</p><p class="metric-sub">${sub || '&nbsp;'}</p></div>`;
+}
+function azDelta(v, base, digits, higherIsBetter = true, unit = '') {
+  if (v == null || base == null || isNaN(v) || isNaN(base)) return '';
+  const d = v - base;
+  const eps = digits === 0 ? 0.5 : Math.pow(10, -digits) / 2;
+  const cls = Math.abs(d) < eps ? 'delta-flat' : ((d > 0) === higherIsBetter ? 'delta-up' : 'delta-down');
+  return `<span class="${cls}">${azSigned(d, digits)}${unit}</span> vs avg`;
+}
+
+function renderAnalysis() {
+  if (!allGames.length || currentTab !== 'analysis') return;
+  renderAnalysisFilters();
+
+  const base = azBase();
+  const sel = azSelection(base);
+  const b = azStats(base);
+  const s = azStats(sel);
+
+  const typeDesc = az.types.size ? [...az.types].join(' + ') : 'all game types';
+  const sideDesc = az.team === 'all' ? 'Both sides'
+    : `<span class="${az.team === 'Red' ? 'team-red' : 'team-blue'}">${az.team} side</span>`;
+  document.getElementById('az-scope-title').innerHTML = `⟢ ${azEsc(az.map || 'All maps')} · ${sideDesc}`;
+  document.getElementById('az-scope-sub').textContent =
+    `${s.n} games in this selection (${typeDesc}). Deltas compare against your average across all ${b.n} games of ${typeDesc}.`;
+
+  // ---- Summary metrics ----
+  document.getElementById('az-metrics').innerHTML = !s.n
+    ? '<div class="empty-state" style="grid-column: 1 / -1;">No games match this selection.</div>'
+    : [
+      azMetricCard('Record', `${s.w}-${s.l}`, `${s.n} games${s.n < AZ_MIN ? ' · small sample' : ''}`),
+      azMetricCard('Win Rate', azPct(s.wr), azDelta(s.wr, b.wr, 0, true, ' pts')),
+      azMetricCard('K/D', az2(s.kd), azDelta(s.kd, b.kd, 2)),
+      azMetricCard('Avg Kills', az1(s.k), azDelta(s.k, b.k, 1)),
+      azMetricCard('Avg Assists', az1(s.a), azDelta(s.a, b.a, 1)),
+      azMetricCard('Avg Deaths', az1(s.d), azDelta(s.d, b.d, 1, false)),
+      azMetricCard('Avg +/-', azSigned(s.diff), azDelta(s.diff, b.diff, 1)),
+      azMetricCard('Avg Team Margin', azSigned(s.margin, 0) + '%', azDelta(s.margin, b.margin, 0, true, ' pts')),
+    ].join('');
+
+  // ---- Per-map breakdown (respects game type only) ----
+  const mapNames = [...new Set(base.map(g => g.Map))];
+  const rows = mapNames.map(m => {
+    const mg = base.filter(g => g.Map === m);
+    return {
+      map: m,
+      all: azStats(mg),
+      red: azStats(mg.filter(g => g.Team === 'Red')),
+      blue: azStats(mg.filter(g => g.Team === 'Blue')),
+    };
+  });
+  rows.forEach(r => r.gap = (r.red.n && r.blue.n) ? r.red.wr - r.blue.wr : null);
+
+  renderAzInsights(base, rows);
+  renderAzSides(base);
+  renderAzMatrix(base, rows);
+  renderAzWrChart(rows);
+  renderAzTrend(sel);
+  renderAzLog(sel);
+}
+
+function renderAzInsights(base, rows) {
+  const out = [];
+  const ranked = rows.filter(r => r.all.n >= AZ_MIN);
+  const b = azStats(base);
+  const side = t => azStats(base.filter(g => g.Team === t));
+
+  if (!az.map) {
+    if (ranked.length >= 2) {
+      const byWr = [...ranked].sort((x, y) => y.all.wr - x.all.wr || y.all.kd - x.all.kd);
+      const best = byWr[0], worst = byWr[byWr.length - 1];
+      out.push(`Best map: <strong>${azEsc(best.map)}</strong>, ${azPct(best.all.wr)} win rate over ${best.all.n} games (K/D ${az2(best.all.kd)}).`);
+      out.push(`Toughest map: <strong>${azEsc(worst.map)}</strong>, ${azPct(worst.all.wr)} win rate over ${worst.all.n} games (K/D ${az2(worst.all.kd)}).`);
+      const byKd = [...ranked].sort((x, y) => y.all.kd - x.all.kd);
+      if (byKd[0].map !== best.map) {
+        out.push(`Your best slaying map is <strong>${azEsc(byKd[0].map)}</strong> (K/D ${az2(byKd[0].all.kd)}), even though it isn't your top map for wins.`);
+      }
+    }
+    const r = side('Red'), bl = side('Blue');
+    if (r.n && bl.n) {
+      const gap = r.wr - bl.wr;
+      const better = gap >= 0 ? 'Red' : 'Blue';
+      out.push(Math.abs(gap) < 3
+        ? `Side barely matters overall: ${azPct(r.wr)} on Red (${r.n} games) vs ${azPct(bl.wr)} on Blue (${bl.n} games).`
+        : `Overall you win more on <strong class="${better === 'Red' ? 'team-red' : 'team-blue'}">${better}</strong>: ${azPct(r.wr)} on Red (${r.n} games) vs ${azPct(bl.wr)} on Blue (${bl.n} games).`);
+    }
+    const splits = rows.filter(x => x.red.n >= 3 && x.blue.n >= 3).sort((x, y) => Math.abs(y.gap) - Math.abs(x.gap));
+    if (splits.length && Math.abs(splits[0].gap) >= 10) {
+      const x = splits[0];
+      const better = x.gap >= 0 ? 'Red' : 'Blue';
+      out.push(`Biggest side split: <strong>${azEsc(x.map)}</strong>. You win ${azPct(x.red.wr)} as Red (${x.red.n} games) vs ${azPct(x.blue.wr)} as Blue (${x.blue.n} games), so ${better} is the side to want there.`);
+    }
+    const thin = rows.filter(x => x.all.n < AZ_MIN).map(x => azEsc(x.map));
+    if (thin.length) out.push(`Not enough games yet to judge: ${thin.join(', ')}.`);
+  } else {
+    const row = rows.find(x => x.map === az.map);
+    if (!row) { document.getElementById('az-insights').innerHTML = '<li>No games on this map for the chosen game type.</li>'; return; }
+    const m = row.all;
+    if (m.n >= AZ_MIN && ranked.length >= 2) {
+      const pos = [...ranked].sort((x, y) => y.all.wr - x.all.wr).findIndex(x => x.map === az.map) + 1;
+      out.push(`<strong>${azEsc(az.map)}</strong> ranks #${pos} of ${ranked.length} maps by win rate (${azPct(m.wr)}, ${m.w}-${m.l}).`);
+    } else {
+      out.push(`Only ${m.n} game${m.n === 1 ? '' : 's'} on <strong>${azEsc(az.map)}</strong> so far. Treat these numbers as a small sample.`);
+    }
+    const wrD = m.wr - b.wr, kdD = m.kd - b.kd;
+    out.push(`Compared with your average, you win ${Math.abs(Math.round(wrD))} pts ${wrD >= 0 ? 'more' : 'less'} often here and your K/D is ${Math.abs(kdD).toFixed(2)} ${kdD >= 0 ? 'higher' : 'lower'} (${az2(m.kd)} vs ${az2(b.kd)}).`);
+    if (row.red.n && row.blue.n) {
+      const better = row.gap >= 0 ? 'Red' : 'Blue';
+      const small = Math.min(row.red.n, row.blue.n) < 3 ? ' Small sample on one side, so take it lightly.' : '';
+      out.push(Math.abs(row.gap) < 3
+        ? `Side makes little difference here: ${azPct(row.red.wr)} on Red vs ${azPct(row.blue.wr)} on Blue.${small}`
+        : `On this map you do better on <strong class="${better === 'Red' ? 'team-red' : 'team-blue'}">${better}</strong>: ${azPct(row.red.wr)} as Red (${row.red.n} games, K/D ${az2(row.red.kd)}) vs ${azPct(row.blue.wr)} as Blue (${row.blue.n} games, K/D ${az2(row.blue.kd)}).${small}`);
+    } else {
+      out.push(`You've only played ${row.red.n ? 'Red' : 'Blue'} on this map so far.`);
+    }
+    const mg = base.filter(g => g.Map === az.map);
+    const last = mg.slice(-5);
+    const lastS = azStats(last);
+    out.push(`Last ${last.length} here: ${last.map(g => g.Result === 'W' ? '<span class="pill pill-w">W</span>' : '<span class="pill pill-l">L</span>').join(' ')} · K/D ${az2(lastS.kd)}.`);
+    const bestGame = [...mg].sort((x, y) => y.Diff - x.Diff || y.Kills - x.Kills)[0];
+    const worstGame = [...mg].sort((x, y) => x.Diff - y.Diff || y.Deaths - x.Deaths)[0];
+    out.push(`Best game here: #${bestGame.Game} (${bestGame.Kills}-${bestGame.Assists}-${bestGame.Deaths}, ${azSigned(bestGame.Diff, 0)}, ${bestGame.Result}). Worst: #${worstGame.Game} (${worstGame.Kills}-${worstGame.Assists}-${worstGame.Deaths}, ${azSigned(worstGame.Diff, 0)}, ${worstGame.Result}).`);
+  }
+  document.getElementById('az-insights').innerHTML = out.map(x => `<li>${x}</li>`).join('') || '<li>Not enough data yet.</li>';
+}
+
+function renderAzSides(base) {
+  const scope = az.map ? base.filter(g => g.Map === az.map) : base;
+  const r = azStats(scope.filter(g => g.Team === 'Red'));
+  const bl = azStats(scope.filter(g => g.Team === 'Blue'));
+  document.getElementById('az-side-title').textContent = `Red vs Blue · ${az.map || 'All maps'}`;
+  document.getElementById('az-side-sub').textContent = 'How you perform on each side' + (az.map ? ' of this map' : '') + '. The better value in each row is highlighted. The Team Color filter does not apply here.';
+
+  const defs = [
+    ['Games', x => x.n, v => v, null],
+    ['Record', x => x.w, (v, x) => `${x.w}-${x.l}`, null],
+    ['Win rate', x => x.wr, azPct, true],
+    ['K/D', x => x.kd, az2, true],
+    ['Avg kills', x => x.k, az1, true],
+    ['Avg assists', x => x.a, az1, true],
+    ['Avg deaths', x => x.d, az1, false],
+    ['Avg +/-', x => x.diff, v => azSigned(v), true],
+    ['Avg team margin', x => x.margin, v => azSigned(v, 0) + '%', true],
+  ];
+  const cell = (x, other, [, get, fmt, hib]) => {
+    if (!x.n) return '<td>—</td>';
+    const v = get(x);
+    let better = false;
+    if (hib !== null && other.n) {
+      const o = get(other);
+      better = hib ? v > o + 1e-9 : v < o - 1e-9;
+    }
+    return `<td class="${better ? 'better' : ''}">${fmt(v, x)}</td>`;
+  };
+  document.getElementById('az-side').innerHTML = `
+    <thead><tr><th></th><th class="team-red">Red</th><th class="team-blue">Blue</th></tr></thead>
+    <tbody>${defs.map(d => `<tr><td>${d[0]}</td>${cell(r, bl, d)}${cell(bl, r, d)}</tr>`).join('')}</tbody>`;
+
+  let verdict = '';
+  if (r.n && bl.n) {
+    const gap = r.wr - bl.wr;
+    const better = gap >= 0 ? 'Red' : 'Blue';
+    verdict = Math.abs(gap) < 3
+      ? `Win rates are about even between sides.`
+      : `You win <strong>${Math.abs(Math.round(gap))} pts</strong> more often on <strong class="${better === 'Red' ? 'team-red' : 'team-blue'}">${better}</strong>.`;
+    if (Math.min(r.n, bl.n) < AZ_MIN) verdict += ` <span style="color:var(--muted);">Fewer than ${AZ_MIN} games on one side, so it's an early read.</span>`;
+  } else if (r.n || bl.n) {
+    verdict = `Only played ${r.n ? 'Red' : 'Blue'} here so far.`;
+  }
+  document.getElementById('az-side-verdict').innerHTML = verdict;
+}
+
+function renderAzMatrix(base, rows) {
+  const key = az.sort.key, dir = az.sort.dir;
+  const val = r => {
+    switch (key) {
+      case 'map': return r.map.toLowerCase();
+      case 'wr': return r.all.wr;
+      case 'kd': return r.all.kd;
+      case 'rwr': return r.red.n ? r.red.wr : -1;
+      case 'bwr': return r.blue.n ? r.blue.wr : -1;
+      case 'gap': return r.gap == null ? -999 : Math.abs(r.gap);
+      default: return r.all.n;
+    }
+  };
+  const sorted = [...rows].sort((x, y) => {
+    const a = val(x), c = val(y);
+    return (a < c ? -1 : a > c ? 1 : 0) * dir || y.all.n - x.all.n;
+  });
+  const arrow = k => key === k ? (dir < 0 ? ' ▼' : ' ▲') : '';
+  const th = (k, lbl, cls = '') => `<th class="sortable ${cls}" data-sort="${k}">${lbl}${arrow(k)}</th>`;
+  const trio = (st, withN = true) => {
+    const small = st.n && st.n < AZ_MIN ? 'small' : '';
+    return (withN ? `<td class="${small}">${st.n || '—'}</td>` : '') +
+      `<td class="${small}" style="background:${azWrBg(st)};">${st.n ? azPct(st.wr) : '—'}</td>` +
+      `<td class="${small}">${st.n ? az2(st.kd) : '—'}</td>`;
+  };
+  const gapCell = g => g == null ? '<td style="color:var(--muted);">—</td>'
+    : Math.abs(g) < 3 ? '<td style="color:var(--muted);">even</td>'
+    : `<td class="${g > 0 ? 'team-red' : 'team-blue'}">${g > 0 ? 'Red' : 'Blue'} +${Math.abs(Math.round(g))}</td>`;
+
+  const tot = { all: azStats(base), red: azStats(base.filter(g => g.Team === 'Red')), blue: azStats(base.filter(g => g.Team === 'Blue')) };
+  tot.gap = (tot.red.n && tot.blue.n) ? tot.red.wr - tot.blue.wr : null;
+
+  document.getElementById('az-matrix').innerHTML = `
+    <thead>
+      <tr><th></th><th class="group" colspan="3">Overall</th><th class="group team-red" colspan="3">Red</th><th class="group team-blue" colspan="3">Blue</th><th></th></tr>
+      <tr>${th('map', 'Map')}${th('n', 'GP')}${th('wr', 'Win%')}${th('kd', 'K/D')}
+        <th>GP</th>${th('rwr', 'Win%')}<th>K/D</th>
+        <th>GP</th>${th('bwr', 'Win%')}<th>K/D</th>
+        ${th('gap', 'Side edge')}</tr>
+    </thead>
+    <tbody>
+      ${sorted.map(r => `<tr data-map="${azEsc(r.map)}" class="${az.map === r.map ? 'selected' : ''}">
+        <td>${azEsc(r.map)}</td>${trio(r.all)}${trio(r.red)}${trio(r.blue)}${gapCell(r.gap)}
+      </tr>`).join('')}
+      <tr class="total-row"><td>All maps</td>${trio(tot.all)}${trio(tot.red)}${trio(tot.blue)}${gapCell(tot.gap)}</tr>
+    </tbody>`;
+
+  document.querySelectorAll('#az-matrix th.sortable').forEach(el => el.addEventListener('click', () => {
+    const k = el.dataset.sort;
+    if (az.sort.key === k) az.sort.dir *= -1;
+    else az.sort = { key: k, dir: k === 'map' ? 1 : -1 };
+    renderAnalysis();
+  }));
+  document.querySelectorAll('#az-matrix tbody tr[data-map]').forEach(el => el.addEventListener('click', () => {
+    const m = el.dataset.map;
+    az.map = az.map === m ? null : m;
+    renderAnalysis();
+  }));
+}
+
+function renderAzWrChart(rows) {
+  const sorted = [...rows].sort((x, y) => y.all.n - x.all.n);
+  const labels = sorted.map(r => r.map);
+  const hl = c => labels.map(m => (!az.map || az.map === m) ? c : c + '44');
+  if (charts.azWr) charts.azWr.destroy();
+  charts.azWr = new Chart(document.getElementById('ch_az_wr'), {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: 'Overall', data: sorted.map(r => r.all.wr), backgroundColor: hl('#8aa377'), stats: sorted.map(r => r.all) },
+      { label: 'Red', data: sorted.map(r => r.red.n ? r.red.wr : null), backgroundColor: hl(AZ_RED), stats: sorted.map(r => r.red) },
+      { label: 'Blue', data: sorted.map(r => r.blue.n ? r.blue.wr : null), backgroundColor: hl(AZ_BLUE), stats: sorted.map(r => r.blue) },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      onClick: (evt, els) => {
+        if (!els.length) return;
+        const m = labels[els[0].index];
+        az.map = az.map === m ? null : m;
+        renderAnalysis();
+      },
+      plugins: {
+        legend: { labels: { boxWidth: 12, font: { size: 12 } } },
+        tooltip: { callbacks: { label: ctx => {
+          const st = ctx.dataset.stats[ctx.dataIndex];
+          return st.n ? `${ctx.dataset.label}: ${azPct(st.wr)} (${st.w}-${st.l}, K/D ${az2(st.kd)})` : `${ctx.dataset.label}: no games`;
+        } } },
+        annotation: { annotations: { half: { type: 'line', yMin: 50, yMax: 50, borderColor: '#d4af37', borderWidth: 2, borderDash: [4, 4] } } }
+      },
+      scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' }, title: { display: true, text: 'Win rate' } } }
+    }
+  });
+}
+
+function renderAzTrend(sel) {
+  const scope = [azEsc(az.map || 'All maps'), az.team === 'all' ? 'both sides' : az.team].join(' · ');
+  document.getElementById('az-trend-title').innerHTML = `K/D over time · ${scope}`;
+  if (charts.azTrend) { charts.azTrend.destroy(); charts.azTrend = null; }
+  if (!sel.length) return;
+  const cap = 6;
+  const ratios = sel.map(g => g.Ratio);
+  const rolling = ratios.map((_, i) => {
+    const sl = sel.slice(Math.max(0, i - 4), i + 1);
+    const K = sl.reduce((a, g) => a + g.Kills, 0), D = sl.reduce((a, g) => a + g.Deaths, 0);
+    return D > 0 ? K / D : K;
+  });
+  charts.azTrend = new Chart(document.getElementById('ch_az_trend'), {
+    type: 'line',
+    data: { labels: sel.map(g => g.Game), datasets: [
+      { label: 'K/D', data: ratios.map(r => Math.min(cap, r)), showLine: false,
+        pointRadius: 4, pointHoverRadius: 6,
+        pointBackgroundColor: sel.map(g => g.Result === 'W' ? C.hud : C.loss),
+        pointBorderColor: sel.map(g => g.Team === 'Red' ? AZ_RED : AZ_BLUE), pointBorderWidth: 1 },
+      { label: 'Rolling K/D (5)', data: rolling.map(r => Math.min(cap, r)), borderColor: C.accent,
+        backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.3 },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { boxWidth: 12, font: { size: 12 } } },
+        tooltip: { callbacks: {
+          title: ctxs => `Game ${ctxs[0].label}`,
+          label: ctx => {
+            if (ctx.datasetIndex === 1) return `Rolling K/D: ${rolling[ctx.dataIndex].toFixed(2)}`;
+            const g = sel[ctx.dataIndex];
+            return [`${g.Map} · ${g.Team} · ${g.Result}`, `K ${g.Kills} / A ${g.Assists} / D ${g.Deaths}`, `K/D ${g.Ratio.toFixed(2)}`];
+          }
+        } },
+        annotation: { annotations: { even: { type: 'line', yMin: 1, yMax: 1, borderColor: '#d4af37', borderWidth: 1, borderDash: [4, 4] } } }
+      },
+      scales: { y: { min: 0, max: cap, title: { display: true, text: 'K/D' } }, x: { title: { display: true, text: 'Game #' } } }
+    }
+  });
+}
+
+function renderAzLog(sel) {
+  document.getElementById('az-log-sub').textContent = `${sel.length} games · most recent first.`;
+  if (!sel.length) { document.getElementById('az-log').innerHTML = '<tbody><tr><td class="empty-state">No games match this selection.</td></tr></tbody>'; return; }
+  document.getElementById('az-log').innerHTML = `
+    <thead><tr><th>Game</th><th>Map</th><th>Type</th><th>Side</th><th>Result</th><th>Score</th><th>K</th><th>A</th><th>D</th><th>K/D</th></tr></thead>
+    <tbody>${[...sel].reverse().map(g => `<tr>
+      <td>${g.Game}</td><td>${azEsc(g.Map)}</td><td>${azEsc(g['Game Type'])}</td>
+      <td class="${g.Team === 'Red' ? 'team-red' : 'team-blue'}">${g.Team}</td>
+      <td>${g.Result === 'W' ? '<span class="pill pill-w">W</span>' : '<span class="pill pill-l">L</span>'}</td>
+      <td>${g['Good Guys']}–${g['Bad Guys']} <span style="color:var(--muted);">(${g.Margin >= 0 ? '+' : ''}${g.Margin})</span></td>
+      <td>${g.Kills}</td><td>${g.Assists}</td><td>${g.Deaths}</td><td>${g.Ratio.toFixed(2)}</td>
+    </tr>`).join('')}</tbody>`;
+}
+
+(function initTabs() {
+  let start = 'overview';
+  try { start = localStorage.getItem('haloTab') || 'overview'; } catch (e) {}
+  showTab(start);
+})();
+
+loadAndRender();
+</script>
+</body>
+</html>
