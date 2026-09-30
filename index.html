@@ -747,6 +747,73 @@
     box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent);
   }
   .az-matrix tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); }
+  /* =====================================================================
+     MOBILE LAYOUT (phones / narrow screens)
+     ===================================================================== */
+  html, body { overflow-x: hidden; }
+  .scroll-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  @media (max-width: 720px) {
+    body { font-size: 15px; }
+    main { padding: 10px 12px 40px; }
+
+    /* Header: compact title, games count + Sync on one row */
+    header { padding: 14px 16px; gap: 8px; }
+    header h1 { font-size: 13px; letter-spacing: 2px; line-height: 1.4; }
+    header .subtitle { font-size: 11px; letter-spacing: 1.5px; }
+    header .meta { width: 100%; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+    header .meta button { margin-left: 8px; padding: 7px 14px; font-size: 10px; }
+
+    /* Tabs: two equal buttons side by side */
+    .tab-bar { display: grid; grid-template-columns: 1fr 1fr; padding: 0 12px; margin-top: 12px; }
+    .tab-btn { font-size: 9px; letter-spacing: 1px; padding: 12px 6px; text-align: center; }
+
+    /* Panels: tighter padding */
+    .card, .filter-bar { padding: 14px 12px; margin-bottom: 12px; }
+    .card h3, .filter-label { font-size: 11px; letter-spacing: 2px; }
+    .card .sub, .filter-hint, .section-sub { font-size: 14px; }
+    .section-title { font-size: 12px; letter-spacing: 3px; }
+    .filter-hint { display: none; }
+
+    /* Filter chips: one swipeable row instead of a wall of buttons */
+    .map-chips {
+      flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; padding-bottom: 2px;
+      mask-image: linear-gradient(90deg, #000 88%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+    }
+    .map-chips::-webkit-scrollbar { display: none; }
+    .map-chip { flex: 0 0 auto; font-size: 13px; padding: 7px 12px; }
+
+    /* Metric cards: 2 per row, smaller numbers */
+    .metric-grid, #az-metrics { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .metric-card { padding: 12px; }
+    .metric-value { font-size: 17px; }
+    .metric-label { font-size: 11px; letter-spacing: 1.5px; }
+    .metric-card .tooltip { left: 0; right: 0; min-width: 0; max-width: none; }
+    .metric-card.tip-left .tooltip { left: 0; right: 0; }
+
+    /* All-Time Bests / Hall of Fame / Recent Form: 2 per row */
+    .all-time-grid, .hof-grid, .recent-mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .all-time-item, .hof-item, .recent-mini { padding: 10px; }
+    .all-time-item .at-val, .hof-item .hof-val, .recent-mini .val { font-size: 15px; }
+    .hof-item .hof-lbl, .all-time-item .at-lbl { font-size: 10px; letter-spacing: 1px; }
+    .hof-item .hof-sub, .all-time-item .at-sub { font-size: 12px; }
+    #gametype-compare-grid { grid-template-columns: 1fr; }
+
+    /* Tables: smaller text, swipe sideways inside the card */
+    table { font-size: 14px; }
+    table th { font-size: 11px; letter-spacing: 1px; padding: 6px; }
+    table td { padding: 6px; white-space: nowrap; }
+    .az-matrix td:first-child, .az-matrix th:first-child {
+      position: sticky; left: 0; z-index: 2; background: #101c10;
+    }
+    .az-matrix thead tr:first-child th:first-child { background: rgba(20,34,20,0.98); }
+    .side-table td:first-child { font-size: 11px; }
+
+    .recs-list li { font-size: 15px; padding: 9px 10px 9px 26px; }
+    .chart-wrap { padding: 6px; }
+    .chart-wrap[style*="height: 420px"] { height: 300px !important; }
+  }
 </style>
 </head>
 <body>
@@ -967,6 +1034,13 @@ Chart.defaults.borderColor = C.grid;
 Chart.defaults.font.family = "'Rajdhani', 'Segoe UI', sans-serif";
 Chart.defaults.font.weight = 600;
 Chart.defaults.font.size = 13;
+const IS_MOBILE = () => window.matchMedia('(max-width: 720px)').matches;
+if (IS_MOBILE()) {
+  Chart.defaults.font.size = 11;
+  Chart.defaults.scale.ticks.maxRotation = 0;
+  Chart.defaults.scale.ticks.autoSkipPadding = 12;
+  Chart.defaults.plugins.legend.labels.boxWidth = 10;
+}
 
 if (window['chartjs-plugin-annotation']) {
   Chart.register(window['chartjs-plugin-annotation']);
@@ -2668,6 +2742,11 @@ function renderAzMatrix(base, rows) {
 function renderAzWrChart(rows) {
   const sorted = [...rows].sort((x, y) => y.all.n - x.all.n);
   const labels = sorted.map(r => r.map);
+  const horiz = IS_MOBILE();
+  const wrap = document.getElementById('ch_az_wr').parentElement;
+  wrap.style.height = horiz ? Math.max(340, labels.length * 46 + 70) + 'px' : '340px';
+  const pctAxis = { min: 0, max: 100, ticks: { callback: v => v + '%' }, title: { display: !horiz, text: 'Win rate' } };
+  const mapAxis = { ticks: { autoSkip: false } };
   const hl = c => labels.map(m => (!az.map || az.map === m) ? c : c + '44');
   if (charts.azWr) charts.azWr.destroy();
   charts.azWr = new Chart(document.getElementById('ch_az_wr'), {
@@ -2679,6 +2758,7 @@ function renderAzWrChart(rows) {
     ]},
     options: {
       responsive: true, maintainAspectRatio: false,
+      indexAxis: horiz ? 'y' : 'x',
       onClick: (evt, els) => {
         if (!els.length) return;
         const m = labels[els[0].index];
@@ -2691,9 +2771,11 @@ function renderAzWrChart(rows) {
           const st = ctx.dataset.stats[ctx.dataIndex];
           return st.n ? `${ctx.dataset.label}: ${azPct(st.wr)} (${st.w}-${st.l}, K/D ${az2(st.kd)})` : `${ctx.dataset.label}: no games`;
         } } },
-        annotation: { annotations: { half: { type: 'line', yMin: 50, yMax: 50, borderColor: '#d4af37', borderWidth: 2, borderDash: [4, 4] } } }
+        annotation: { annotations: { half: horiz
+          ? { type: 'line', xMin: 50, xMax: 50, borderColor: '#d4af37', borderWidth: 2, borderDash: [4, 4] }
+          : { type: 'line', yMin: 50, yMax: 50, borderColor: '#d4af37', borderWidth: 2, borderDash: [4, 4] } } }
       },
-      scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' }, title: { display: true, text: 'Win rate' } } }
+      scales: horiz ? { x: pctAxis, y: mapAxis } : { y: pctAxis, x: mapAxis }
     }
   });
 }
@@ -2752,6 +2834,8 @@ function renderAzLog(sel) {
       <td>${g.Kills}</td><td>${g.Assists}</td><td>${g.Deaths}</td><td>${g.Ratio.toFixed(2)}</td>
     </tr>`).join('')}</tbody>`;
 }
+
+window.matchMedia('(max-width: 720px)').addEventListener('change', () => renderAnalysis());
 
 (function initTabs() {
   let start = 'overview';
